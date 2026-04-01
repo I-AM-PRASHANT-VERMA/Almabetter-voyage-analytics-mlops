@@ -1,0 +1,30 @@
+# ========================================================================
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.venv-airflow/
+.mlflow_temp/
+MLops pipeline/runtime_logs/
+
+
+# Generated Azure helper files kept only on the local machine
+.azure/acr-build-context/
+.azure/*kubeconfig
+.azure/*.out
+.azure/*.err
+.private-notes/
+.private-notes-backup-temp/
+md files/
+archive/
+developer_generated_files/
+local_training/__pycache__/
+local_training/outputs/
+MLops pipeline/local_training/
+legacy_experiment_files/
+
+# Accidental local clone snapshot
+Almabetter-voyage-analytics-mlops/
+
