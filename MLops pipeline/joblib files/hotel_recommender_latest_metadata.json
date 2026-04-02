@@ -1,0 +1,20 @@
+{
+  "model_name": "Collaborative",
+  "model_type": "hotel_recommendation",
+  "selection_metric": "HitRate@5",
+  "metrics": {
+    "model_name": "Collaborative",
+    "run_id": "37rplc15",
+    "run_name": "collaborative_20260530_183025",
+    "hit_rate_at_3": 0.9253,
+    "precision_at_3": 0.3084,
+    "recall_at_3": 0.9253,
+    "hit_rate_at_5": 0.9821,
+    "precision_at_5": 0.1964,
+    "recall_at_5": 0.9821
+  },
+  "created_at": "20260530_183032",
+  "versioned_model_path": "/content/drive/MyDrive/voyage_analytics/model_registry/hotel_recommendation/hotel_recommender_20260530_183032.joblib",
+  "latest_model_path": "/content/drive/MyDrive/voyage_analytics/model_registry/hotel_recommendation/hotel_recommender_latest.joblib",
+  "legacy_model_path": "/content/drive/MyDrive/hotel_recommender_simple.joblib"
+}
