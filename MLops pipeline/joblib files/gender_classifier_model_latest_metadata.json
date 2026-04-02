@@ -1,0 +1,20 @@
+{
+  "model_name": "Linear SVM Tuned",
+  "model_type": "gender_classification",
+  "feature_column": "first_name",
+  "target_column": "gender",
+  "selection_metric": "f1_weighted",
+  "metrics": {
+    "model_name": "Linear SVM Tuned",
+    "run_id": "tc9wre5d",
+    "run_name": "linear_svm_tuned_20260530_184902",
+    "accuracy": 0.9,
+    "precision_weighted": 0.9031856645097062,
+    "recall_weighted": 0.9,
+    "f1_weighted": 0.8998020781791193
+  },
+  "created_at": "20260530_184906",
+  "versioned_model_path": "/content/drive/MyDrive/voyage_analytics/model_registry/gender_classification/gender_classifier_model_20260530_184906.joblib",
+  "latest_model_path": "/content/drive/MyDrive/voyage_analytics/model_registry/gender_classification/gender_classifier_model_latest.joblib",
+  "legacy_model_path": "/content/drive/MyDrive/gender_classifier_best_model.joblib"
+}
