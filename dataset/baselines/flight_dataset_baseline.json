@@ -1,0 +1,68 @@
+{
+    "dataset_file": "dataset\\travel_capstone\\flights.csv",
+    "captured_at": "2026-05-31T02:29:33",
+    "row_count": 271888,
+    "columns": [
+        "travelCode",
+        "userCode",
+        "from",
+        "to",
+        "flightType",
+        "price",
+        "time",
+        "distance",
+        "agency",
+        "date"
+    ],
+    "missing_values": {
+        "travelCode": 0,
+        "userCode": 0,
+        "from": 0,
+        "to": 0,
+        "flightType": 0,
+        "price": 0,
+        "time": 0,
+        "distance": 0,
+        "agency": 0,
+        "date": 0
+    },
+    "numeric_means": {
+        "price": 957.37503,
+        "time": 1.421147,
+        "distance": 546.955535
+    },
+    "category_proportions": {
+        "from": {
+            "Florianopolis (SC)": 0.210811,
+            "Aracaju (SE)": 0.136909,
+            "Campo Grande (MS)": 0.127803,
+            "Brasilia (DF)": 0.113205,
+            "Recife (PE)": 0.112105,
+            "Natal (RN)": 0.087521,
+            "Sao Paulo (SP)": 0.086892,
+            "Salvador (BH)": 0.062908,
+            "Rio de Janeiro (RJ)": 0.061845
+        },
+        "to": {
+            "Florianopolis (SC)": 0.210811,
+            "Aracaju (SE)": 0.136909,
+            "Campo Grande (MS)": 0.127803,
+            "Brasilia (DF)": 0.113205,
+            "Recife (PE)": 0.112105,
+            "Natal (RN)": 0.087521,
+            "Sao Paulo (SP)": 0.086892,
+            "Salvador (BH)": 0.062908,
+            "Rio de Janeiro (RJ)": 0.061845
+        },
+        "flightType": {
+            "firstClass": 0.428184,
+            "premium": 0.286898,
+            "economic": 0.284919
+        },
+        "agency": {
+            "Rainbow": 0.429412,
+            "CloudFy": 0.428037,
+            "FlyingDrops": 0.142551
+        }
+    }
+}
