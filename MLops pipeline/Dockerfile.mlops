@@ -1,0 +1,51 @@
+# -----------------------------
+# 1. Base validation image
+# -----------------------------
+# Shared image for promoted flight model validation.
+FROM python:3.11.15-slim-bookworm
+
+# Keep Python runtime clean and logs visible inside Docker.
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Validation runs from /app.
+WORKDIR /app
+
+# -----------------------------
+# 2. Install runtime dependencies
+# -----------------------------
+# The saved tree model needs libgomp when it is loaded inside the container.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+
+# -----------------------------
+# 3. Install Python dependencies
+# -----------------------------
+# Copy requirements first so the dependency layer is reused on later rebuilds.
+COPY ["MLops pipeline/requirements.txt", "./"]
+
+# Install the packages used by validation and prediction.
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Keep the validation output and model paths ready for mounted storage.
+RUN mkdir -p /app/dataset "/app/joblib files" /app/jenkins_artifacts
+
+# -----------------------------
+# 4. Copy validation inputs
+# -----------------------------
+# Copy the runtime code validated by the workflow.
+COPY ["MLops pipeline/airflow", "/app/airflow"]
+# The validator imports Flask, script, Streamlit, and monitoring modules directly.
+COPY ["MLops pipeline/flask_apps", "/app/flask_apps"]
+COPY ["MLops pipeline/scripts", "/app/scripts"]
+COPY ["MLops pipeline/streamlit", "/app/streamlit"]
+COPY ["MLops pipeline/monitoring.py", "/app/monitoring.py"]
+# Dataset, promoted joblib files, and local training outputs are checked together.
+COPY ["dataset", "/app/dataset"]
+COPY ["MLops pipeline/joblib files", "/app/joblib files"]
+COPY ["local_training", "/app/local_training"]
+
+# -----------------------------
+# 5. Run validation command
+# -----------------------------
+# Default to validating the promoted local MLflow model.
+CMD ["python", "scripts/validate_flight_regression_workflow.py", "--output-dir", "jenkins_artifacts/docker_validation"]

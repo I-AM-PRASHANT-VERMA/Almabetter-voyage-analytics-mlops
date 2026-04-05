@@ -1,0 +1,438 @@
+
+# -----------------------------
+# 1. Compose project name
+# -----------------------------
+# Compose file for local Voyage Analytics serving and validation.
+name: 1-project-voyage-analytics
+
+# -----------------------------
+# 2. Local services
+# -----------------------------
+services:
+  # -----------------------------
+  # 2.1 Local MLflow UI
+  # -----------------------------
+  # Long-running browser UI for local MLflow experiments and registered models.
+  mlflow-ui:
+    profiles: ["mlflow"]
+    build:
+      context: ..
+      dockerfile: MLops pipeline/Dockerfile.mlflow
+    container_name: 1-project-voyage-analytics-mlflow-ui
+    labels:
+      com.voyage.project: "Voyage Analytics MLOps"
+      com.voyage.app: "Local MLflow Workflow"
+      com.voyage.role: "MLflow UI"
+      com.voyage.description: "Browser dashboard for local flight training runs, metrics, artifacts, and registered model versions."
+    command:
+      [
+        "mlflow",
+        "server",
+        "--backend-store-uri",
+        "sqlite:////app/mlflow_data/mlflow.db",
+        "--artifacts-destination",
+        "/app/mlflow_data/artifacts",
+        "--serve-artifacts",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "5000",
+        # MLflow 3.14 validates Host headers from both the browser and the training container.
+        "--allowed-hosts",
+        "localhost,localhost:5004,127.0.0.1,127.0.0.1:5000,mlflow-ui,mlflow-ui:5000",
+      ]
+    ports:
+      # Keep the MLflow dashboard local to this machine.
+      - "127.0.0.1:5004:5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
+    volumes:
+      - mlflow_data:/app/mlflow_data
+
+  # -----------------------------
+  # 2.2 Local MLflow training job
+  # -----------------------------
+  # One-off local training job that sends its runs to the MLflow UI service.
+  mlflow-training:
+    profiles: ["mlflow"]
+    build:
+      context: ..
+      dockerfile: MLops pipeline/Dockerfile.mlflow
+    container_name: 1-project-voyage-analytics-mlflow-training
+    labels:
+      com.voyage.project: "Voyage Analytics MLOps"
+      com.voyage.app: "Local MLflow Workflow"
+      com.voyage.role: "MLflow Training Job"
+      com.voyage.description: "Checks flight dataset drift, runs local Python experiments, registers the best MLflow model, and saves a separate joblib export."
+    command:
+      [
+        "sh",
+        "-c",
+        "python scripts/check_flight_dataset_drift.py && python scripts/run_flight_price_mlflow_experiments.py --tracking-uri http://mlflow-ui:5000 --profile ${MLFLOW_EXPERIMENT_PROFILE:-standard}",
+      ]
+    environment:
+      # The slim training image intentionally omits Git because runs are tied to MLflow artifacts.
+      GIT_PYTHON_REFRESH: "quiet"
+    depends_on:
+      mlflow-ui:
+        condition: service_healthy
+    volumes:
+      - ../dataset:/app/dataset:ro
+      - "./joblib files:/app/joblib files"
+      - ./jenkins_artifacts:/app/jenkins_artifacts
+
+  # -----------------------------
+  # 2.3 Jenkins CI/CD server
+  # -----------------------------
+  # Local Jenkins server for the project CI/CD demo.
+  jenkins:
+    profiles: ["jenkins"]
+    build:
+      context: .
+      dockerfile: jenkins/Dockerfile
+    container_name: 1-project-voyage-analytics-jenkins
+    labels:
+      com.voyage.project: "Voyage Analytics MLOps"
+      com.voyage.app: "CI/CD"
+      com.voyage.role: "Jenkins Server"
+      com.voyage.description: "Local Jenkins server for validating the project pipeline and preparing CI/CD deployment stages."
+    ports:
+      - "8081:8080"
+      - "50001:50000"
+    environment:
+      JAVA_OPTS: "-Djenkins.install.runSetupWizard=false"
+      JENKINS_ADMIN_ID: ${JENKINS_ADMIN_ID:-prashant_jenkins}
+      JENKINS_ADMIN_PASSWORD: ${JENKINS_ADMIN_PASSWORD:-change-me-local}
+    volumes:
+      - ../:/workspace/voyage-root
+      - ./jenkins/jenkins_home:/var/jenkins_home
+      - ./:/workspace/voyage-analytics-mlops
+      - ../dataset:/workspace/dataset:ro
+      - ../local_training:/workspace/local_training
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: "no"
+
+  # -----------------------------
+  # 2.4 Flight validation job
+  # -----------------------------
+  # One-off validation container that checks the promoted local MLflow model without retraining it.
+  flight-validation:
+    # Keep validation behind the optional mlops profile.
+    profiles: ["mlops"]
+    build:
+      context: ..
+      dockerfile: MLops pipeline/Dockerfile.mlops
+    container_name: 1-project-flight-price-voyage-validation
+    labels:
+      com.voyage.project: "Voyage Analytics MLOps"
+      com.voyage.app: "Flight Price Prediction"
+      com.voyage.role: "Validation"
+      com.voyage.description: "Checks the promoted local MLflow joblib model without retraining or overwriting it."
+    # Run the same validation helper used locally, from Airflow, and from Jenkins.
+    command: ["python", "scripts/validate_flight_regression_workflow.py", "--output-dir", "jenkins_artifacts/docker_validation"]
+    environment:
+      # Unbuffered logs make it easier to follow the validation run in Docker output.
+      PYTHONUNBUFFERED: "1"
+      LOCAL_TRAINING_DIR: "/app/local_training"
+    volumes:
+      # Runtime code is mounted read-only so the container validates the current workspace.
+      - ./airflow:/app/airflow:ro
+      - ./flask_apps:/app/flask_apps:ro
+      - ./scripts:/app/scripts:ro
+      - ./streamlit:/app/streamlit:ro
+      # The dataset is read-only because validation should not mutate the source CSV.
+      - ../dataset:/app/dataset:ro
+      # The promoted model is read-only because validation must not overwrite it.
+      - "./joblib files:/app/joblib files:ro"
+      # Local training outputs are mounted read-only so validation can verify the Airflow/MLflow handoff.
+      - ../local_training:/app/local_training:ro
+      # Persist validation summaries for local review and Jenkins-style artifacts.
+      - ./jenkins_artifacts:/app/jenkins_artifacts
+
+  # -----------------------------
+  # 2.5 Flight API service
+  # -----------------------------
+  # Flask API that serves the saved flight model.
+  flight-api:
+    build:
+      context: ..
+      dockerfile: MLops pipeline/Dockerfile
+    container_name: 1-project-flight-price-voyage-api
+    labels:
+      com.voyage.project: "Voyage Analytics MLOps"
+      com.voyage.app: "Flight Price Prediction"
+      com.voyage.role: "Flask API"
+      com.voyage.description: "Backend API for flight price prediction, health checks, and model metadata."
+    ports:
+      - "5002:5002"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      # The container is considered ready once the Flask health route responds.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5002/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    volumes:
+      # The API reads the source dataset for metadata and route summaries.
+      - ../dataset:/app/dataset:ro
+      # The saved model is mounted read-only because serving should not rewrite it.
+      - "./joblib files:/app/joblib files:ro"
+
+  # -----------------------------
+  # 2.6 Flight Streamlit service
+  # -----------------------------
+  # Streamlit frontend that can either call the API or fall back to the local model.
+  flight-streamlit:
+    build:
+      context: ..
+      dockerfile: MLops pipeline/Dockerfile.streamlit
+    container_name: 1-project-flight-price-voyage-streamlit
+    labels:
+      com.voyage.project: "Voyage Analytics MLOps"
+      com.voyage.app: "Flight Price Prediction"
+      com.voyage.role: "Streamlit Website"
+      com.voyage.description: "Browser website for flight price prediction using the promoted joblib model."
+    command:
+      [
+        "streamlit",
+        "run",
+        "streamlit/flight_price_app.py",
+        "--server.address=0.0.0.0",
+        "--server.port=8501",
+        "--server.baseUrlPath=app/flight",
+      ]
+    ports:
+      - "8501:8501"
+    environment:
+      # Inside Compose, the frontend should always talk to the Flask service name.
+      FLIGHT_PRICE_API_URL: ${FLIGHT_PRICE_API_URL:-http://flight-api:5002}
+    depends_on:
+      # Wait for the API to pass its health check before bringing the UI fully online.
+      flight-api:
+        condition: service_healthy
+    healthcheck:
+      # Streamlit exposes its own lightweight health endpoint.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/app/flight/_stcore/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    volumes:
+      # The frontend uses the dataset for charts and contextual summaries.
+      - ../dataset:/app/dataset:ro
+      # The model mount is kept read-only during serving.
+      - "./joblib files:/app/joblib files:ro"
+      # Keep the local Streamlit config in sync with the container.
+      - ./.streamlit:/app/.streamlit:ro
+
+  # -----------------------------
+  # 2.7 Hotel API service
+  # -----------------------------
+  # Flask API that serves hotel recommendation endpoints.
+  hotel-api:
+    build:
+      context: ..
+      dockerfile: MLops pipeline/Dockerfile
+    container_name: 1-project-hotel-recommendation-voyage-api
+    labels:
+      com.voyage.project: "Voyage Analytics MLOps"
+      com.voyage.app: "Hotel Recommendation"
+      com.voyage.role: "Flask API"
+      com.voyage.description: "Backend API for popular hotels, similar hotels, user recommendations, and health checks."
+    command: ["python", "flask_apps/hotel_recommendation_flask_app/app.py"]
+    ports:
+      - "5001:5001"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      # Treat the hotel API as ready once the Flask health route responds.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    volumes:
+      # The API reads the source dataset for recommendation context and metadata routes.
+      - ../dataset:/app/dataset:ro
+      # The saved recommender bundle is mounted read-only during serving.
+      - "./joblib files:/app/joblib files:ro"
+
+  # -----------------------------
+  # 2.8 Hotel Streamlit service
+  # -----------------------------
+  # Streamlit frontend for hotel recommendation.
+  hotel-streamlit:
+    build:
+      context: ..
+      dockerfile: MLops pipeline/Dockerfile.streamlit
+    container_name: 1-project-hotel-recommendation-voyage-streamlit
+    labels:
+      com.voyage.project: "Voyage Analytics MLOps"
+      com.voyage.app: "Hotel Recommendation"
+      com.voyage.role: "Streamlit Website"
+      com.voyage.description: "Browser website for popular, similar, and personalized hotel recommendations."
+    command:
+      [
+        "streamlit",
+        "run",
+        "streamlit/hotel_recommendation_app.py",
+        "--server.address=0.0.0.0",
+        "--server.port=8502",
+        "--server.baseUrlPath=app/hotel",
+      ]
+    ports:
+      - "8502:8502"
+    depends_on:
+      hotel-api:
+        # Wait for the API before starting the UI because the dashboard relies on API-backed flows.
+        condition: service_healthy
+    healthcheck:
+      # The hotel Streamlit app now serves from a base path, so health must use that same path.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8502/app/hotel/_stcore/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    volumes:
+      # The dashboard reads the dataset for tables and summary visuals.
+      - ../dataset:/app/dataset:ro
+      # The saved recommender bundle is mounted read-only during serving.
+      - "./joblib files:/app/joblib files:ro"
+      # Keep the local Streamlit config in sync with the container.
+      - ./.streamlit:/app/.streamlit:ro
+
+  # -----------------------------
+  # 2.9 Gender API service
+  # -----------------------------
+  # Flask API that serves gender classification predictions.
+  gender-api:
+    build:
+      context: ..
+      dockerfile: MLops pipeline/Dockerfile
+    container_name: 1-project-gender-classification-voyage-api
+    labels:
+      com.voyage.project: "Voyage Analytics MLOps"
+      com.voyage.app: "Gender Classification"
+      com.voyage.role: "Flask API"
+      com.voyage.description: "Backend API for gender prediction by name, dataset summary, samples, and health checks."
+    command: ["python", "flask_apps/gender_classification_flask_app/app.py"]
+    ports:
+      - "5003:5003"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      # Treat the gender API as ready once the Flask health route responds.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5003/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    volumes:
+      # The API reads the users dataset for preview and metadata routes.
+      - ../dataset:/app/dataset:ro
+      # The saved classifier bundle is mounted read-only during serving.
+      - "./joblib files:/app/joblib files:ro"
+
+  # -----------------------------
+  # 2.10 Gender Streamlit service
+  # -----------------------------
+  # Streamlit frontend for gender classification.
+  gender-streamlit:
+    build:
+      context: ..
+      dockerfile: MLops pipeline/Dockerfile.streamlit
+    container_name: 1-project-gender-classification-voyage-streamlit
+    labels:
+      com.voyage.project: "Voyage Analytics MLOps"
+      com.voyage.app: "Gender Classification"
+      com.voyage.role: "Streamlit Website"
+      com.voyage.description: "Browser website for gender classification by name using the promoted joblib model."
+    command:
+      [
+        "streamlit",
+        "run",
+        "streamlit/gender_classification_app.py",
+        "--server.address=0.0.0.0",
+        "--server.port=8503",
+        "--server.baseUrlPath=app/gender",
+      ]
+    ports:
+      - "8503:8503"
+    depends_on:
+      gender-api:
+        # Wait for the API before starting the UI because the dashboard relies on API-backed flows.
+        condition: service_healthy
+    healthcheck:
+      # The gender Streamlit app now serves from a base path, so health must use that same path.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8503/app/gender/_stcore/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    volumes:
+      # The dashboard reads the users dataset for charts and previews.
+      - ../dataset:/app/dataset:ro
+      # The saved classifier bundle is mounted read-only during serving.
+      - "./joblib files:/app/joblib files:ro"
+      # Keep the local Streamlit config in sync with the container.
+      - ./.streamlit:/app/.streamlit:ro
+
+  # -----------------------------
+  # 2.11 Local gateway service
+  # -----------------------------
+  # Shared browser entry point for all three apps and all three APIs.
+  voyage-gateway:
+    image: nginx:1.27-alpine
+    container_name: 1-project-voyage-analytics-gateway
+    labels:
+      com.voyage.project: "Voyage Analytics MLOps"
+      com.voyage.app: "Common Entry Point"
+      com.voyage.role: "Nginx Gateway"
+      com.voyage.description: "Single front gate that routes /app/* and /api/* paths to the flight, hotel, and gender services."
+    ports:
+      # Publish one local browser port so all apps and APIs can be opened from a single entry point.
+      - "8090:80"
+    depends_on:
+      flight-api:
+        # The gateway should wait until the flight API is actually healthy.
+        condition: service_healthy
+      flight-streamlit:
+        # The gateway should wait until the flight UI is actually healthy.
+        condition: service_healthy
+      hotel-api:
+        # The gateway should wait until the hotel API is actually healthy.
+        condition: service_healthy
+      hotel-streamlit:
+        # The gateway should wait until the hotel UI is actually healthy.
+        condition: service_healthy
+      gender-api:
+        # The gateway should wait until the gender API is actually healthy.
+        condition: service_healthy
+      gender-streamlit:
+        # The gateway should wait until the gender UI is actually healthy.
+        condition: service_healthy
+    healthcheck:
+      # Keep the gateway health check lightweight because nginx only needs to answer /health.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    volumes:
+      # Mount the hand-written nginx routing file that defines the common local entry point.
+      - ./gateway/nginx-local.conf:/etc/nginx/nginx.conf:ro
+
+# -----------------------------
+# 3. Persistent Docker volumes
+# -----------------------------
+volumes:
+  # Docker keeps the MLflow database and artifacts between demo sessions.
+  mlflow_data:
+    name: 1-project-voyage-analytics-mlflow-data
+
