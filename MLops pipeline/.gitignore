@@ -1,0 +1,76 @@
+# ========================================================================
+
+# Python cache and local tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Local virtual environments
+.venv/
+.venv-airflow/
+.jenkins-venv/
+venv/
+env/
+
+# Local experiment runtime state
+mlruns/
+.mlflow_temp/
+mlflow.db*
+mlartifacts/
+mlruns_local/
+mlartifacts_local/
+mlruns_airflow/
+mlartifacts_airflow/
+mlruns_airflow_test/
+mlartifacts_airflow_test/
+
+# Local Airflow runtime state
+airflow/logs/
+airflow/airflow.cfg
+airflow/airflow.db
+airflow/airflow.db-shm
+airflow/airflow.db-wal
+airflow/standalone_admin_password.txt
+airflow/simple_auth_manager_passwords.json.generated
+airflow/*.pid
+airflow_runtime/
+
+# Generated model outputs
+joblib files/*.joblib
+joblib files/*_metadata.json
+joblib files/mlflow_training/
+!joblib files/flight_price_model.joblib
+!joblib files/flight_price_model_metadata.json
+!joblib files/gender_classifier_best_model.joblib
+!joblib files/gender_classifier_model_latest.joblib
+!joblib files/gender_classifier_model_latest_metadata.json
+!joblib files/hotel_recommender_latest.joblib
+!joblib files/hotel_recommender_latest_metadata.json
+!joblib files/hotel_recommender_simple.joblib
+
+# Local secrets and OS files
+.env
+.streamlit/secrets.toml
+LOCAL_AIRFLOW_LOGIN.md
+LOCAL_JENKINS_SETUP.md
+jenkins/jenkins_home/
+.DS_Store
+Thumbs.db
+
+# Local Jenkins validation outputs
+jenkins_artifacts/
+run_logs/
+runtime_logs/
+monitoring_reports/
+
+# Local training generated outputs
+local_training/__pycache__/
+local_training/outputs/
+
+# Personal notes and leftover local folders
+help.txt
+help me.rd
+read me ngrok.rd/
+templete/
+
