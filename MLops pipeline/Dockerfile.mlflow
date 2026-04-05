@@ -1,0 +1,41 @@
+# -----------------------------
+# 1. Base MLflow image
+# -----------------------------
+# Local MLflow image used for the UI server and the optional experiment job.
+FROM python:3.11.15-slim-bookworm
+
+# Keep Python runtime clean and logs visible inside Docker.
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Set the working folder inside the container.
+WORKDIR /app
+
+# -----------------------------
+# 2. Install runtime dependencies
+# -----------------------------
+# XGBoost needs libgomp when local MLflow experiments run inside the container.
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+
+# -----------------------------
+# 3. Install Python dependencies
+# -----------------------------
+# Copy requirements first so dependency installation can use Docker layer caching.
+COPY ["MLops pipeline/requirements-mlflow.txt", "./"]
+RUN pip install --no-cache-dir -r requirements-mlflow.txt
+
+# -----------------------------
+# 4. Copy training scripts
+# -----------------------------
+# Copy the runner scripts and the single official local training source.
+COPY ["MLops pipeline/scripts", "/app/scripts"]
+COPY ["local_training", "/app/local_training"]
+
+# These folders are mounted or reused by Compose jobs for data, artifacts, and MLflow state.
+RUN mkdir -p /app/dataset /app/joblib_files /app/jenkins_artifacts /app/mlflow_data
+
+# -----------------------------
+# 5. Default training command
+# -----------------------------
+# The UI service overrides this command. The training service uses it as-is.
+CMD ["python", "scripts/run_flight_price_mlflow_experiments.py", "--tracking-uri", "http://mlflow-ui:5000"]

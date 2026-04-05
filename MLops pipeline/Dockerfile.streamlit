@@ -1,0 +1,67 @@
+# -----------------------------
+# 1. Base runtime image
+# -----------------------------
+# This image is only for the browser dashboard, not for model training.
+# Slim Python image keeps the Streamlit container practical for local demos.
+FROM python:3.11.15-slim-bookworm
+
+# Keep Python output cleaner inside the container.
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Stream logs immediately so Docker and deployment logs update without buffering.
+ENV PYTHONUNBUFFERED=1
+
+# Streamlit and the shared files live under /app.
+WORKDIR /app
+
+# -----------------------------
+# 2. Install runtime dependencies
+# -----------------------------
+# XGBoost still needs libgomp here because the app can load the saved flight model.
+# This keeps the local fallback prediction path working even without the Flask API.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+
+# -----------------------------
+# 3. Install Python dependencies
+# -----------------------------
+# Copy requirements first so dependency installs stay cached across UI edits.
+COPY ["MLops pipeline/requirements.txt", "./"]
+
+# Install the packages needed by Streamlit and the local prediction fallback.
+# Requests is also needed because the dashboard can call the Flask API.
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Keep the model path ready so Azure File mounts work the same in every environment.
+# The folder is also used when Docker Compose mounts the promoted joblib artifact.
+RUN mkdir -p "/app/joblib files"
+
+# -----------------------------
+# 4. Copy dashboard files
+# -----------------------------
+# Copy the app code, the Streamlit config, and the dataset used for local summaries.
+# Only frontend-related project files are copied into this image.
+COPY ["MLops pipeline/streamlit", "/app/streamlit"]
+
+# Shared monitoring setup is used by the dashboard startup code.
+COPY ["MLops pipeline/monitoring.py", "/app/monitoring.py"]
+
+# Keep the same Streamlit settings in local Docker and cloud containers.
+COPY ["MLops pipeline/.streamlit", "/app/.streamlit"]
+
+# The frontend reads the dataset for dropdowns, metrics, and route context.
+# This dataset supports the UI explanation; training is not done in this container.
+COPY ["dataset", "/app/dataset"]
+
+# Include the model artifact for local fallback predictions; Compose can mount over it.
+COPY ["MLops pipeline/joblib files", "/app/joblib files"]
+
+# -----------------------------
+# 5. Expose and start dashboard
+# -----------------------------
+# The Streamlit app is exposed on port 8501.
+# Docker Compose can map this port directly or serve it through the gateway.
+EXPOSE 8501
+
+# Bind to all interfaces so Docker and Compose can reach the app from outside the container.
+# Compose overrides this command when it needs a base URL path such as /app/flight.
+CMD ["streamlit", "run", "streamlit/flight_price_app.py", "--server.address=0.0.0.0", "--server.port=8501"]
