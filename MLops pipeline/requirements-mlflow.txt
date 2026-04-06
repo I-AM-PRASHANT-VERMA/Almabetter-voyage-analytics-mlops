@@ -1,0 +1,7 @@
+# Keep container training and model serialization aligned with the validated local environment.
+pandas==2.2.3
+numpy==2.0.2
+joblib==1.4.2
+scikit-learn==1.6.1
+xgboost==3.0.2
+mlflow==3.14.0
