@@ -1,0 +1,5 @@
+
+# Install this file first, then install requirements.txt in the same Airflow venv.
+# Airflow constraints currently conflict with the saved model's scikit-learn==1.6.1,
+# so the project keeps the package steps explicit instead of using constraints here.
+apache-airflow==3.2.0
