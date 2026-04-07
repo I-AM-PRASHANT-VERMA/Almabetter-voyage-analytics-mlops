@@ -1,0 +1,126 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job">
+  <actions/>
+  <description>Voyage Analytics local MLOps CI pipeline. It validates project files, promoted joblib models, MLflow/Airflow outputs, and Docker Compose config.</description>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">
+    <script>pipeline {
+    agent any
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    parameters {
+        booleanParam(name: &apos;BUILD_DOCKER_IMAGES&apos;, defaultValue: false, description: &apos;Build Docker images after validation.&apos;)
+        booleanParam(name: &apos;ENABLE_DEPLOYMENT&apos;, defaultValue: false, description: &apos;Keep this disabled until Kubernetes and Azure are confirmed.&apos;)
+    }
+
+    environment {
+        PROJECT_ROOT = &apos;/workspace/voyage-analytics-mlops&apos;
+        VENV_DIR = &apos;/tmp/voyage-jenkins-ci-venv&apos;
+        JENKINS_OUTPUT_DIR = &apos;/workspace/voyage-analytics-mlops/jenkins_artifacts&apos;
+        PYTHONUNBUFFERED = &apos;1&apos;
+    }
+
+    stages {
+        stage(&apos;Agent Check&apos;) {
+            steps {
+                sh &apos;&apos;&apos;
+                    set -e
+                    python3 --version
+                    test -d &quot;$PROJECT_ROOT&quot;
+                    test -f &quot;$PROJECT_ROOT/Jenkinsfile&quot;
+                    mkdir -p &quot;$JENKINS_OUTPUT_DIR&quot;
+                &apos;&apos;&apos;
+            }
+        }
+
+        stage(&apos;Set Up Python&apos;) {
+            steps {
+                sh &apos;&apos;&apos;
+                    set -e
+                    rm -rf &quot;$VENV_DIR&quot;
+                    python3 -m venv &quot;$VENV_DIR&quot;
+                    . &quot;$VENV_DIR/bin/activate&quot;
+                    python -m pip install --upgrade pip
+                    cd &quot;$PROJECT_ROOT&quot;
+                    pip install -r requirements.txt
+                &apos;&apos;&apos;
+            }
+        }
+
+        stage(&apos;Validate Models And Project&apos;) {
+            steps {
+                sh &apos;&apos;&apos;
+                    set -e
+                    . &quot;$VENV_DIR/bin/activate&quot;
+                    cd &quot;$PROJECT_ROOT&quot;
+                    python scripts/validate_jenkins_ci.py --output-dir &quot;$JENKINS_OUTPUT_DIR/ci_validation_from_jenkins_job&quot;
+                    python scripts/validate_flight_regression_workflow.py --output-dir &quot;$JENKINS_OUTPUT_DIR/flight_validation_from_jenkins_job&quot;
+                &apos;&apos;&apos;
+            }
+        }
+
+        stage(&apos;Docker Compose Config&apos;) {
+            steps {
+                sh &apos;&apos;&apos;
+                    set -e
+                    cd &quot;$PROJECT_ROOT&quot;
+                    if command -v docker &gt;/dev/null 2&gt;&amp;1 &amp;&amp; docker compose version &gt;/dev/null 2&gt;&amp;1; then
+                        docker compose --profile mlops --profile mlflow config &gt; &quot;$JENKINS_OUTPUT_DIR/docker-compose-resolved-from-jenkins.yml&quot;
+                    else
+                        echo &quot;Docker CLI is not available inside this Jenkins container.&quot; &gt; &quot;$JENKINS_OUTPUT_DIR/docker-validation-note.txt&quot;
+                    fi
+                &apos;&apos;&apos;
+            }
+        }
+
+        stage(&apos;Docker Build&apos;) {
+            when {
+                expression { params.BUILD_DOCKER_IMAGES }
+            }
+            steps {
+                sh &apos;&apos;&apos;
+                    set -e
+                    cd &quot;$PROJECT_ROOT&quot;
+                    docker compose --profile mlops --profile mlflow build \
+                        flight-api flight-streamlit \
+                        hotel-api hotel-streamlit \
+                        gender-api gender-streamlit \
+                        flight-validation \
+                        mlflow-ui mlflow-training
+                &apos;&apos;&apos;
+            }
+        }
+
+        stage(&apos;Deployment Gate&apos;) {
+            steps {
+                script {
+                    if (params.ENABLE_DEPLOYMENT) {
+                        error(&apos;Deployment is not enabled yet. Confirm Kubernetes and Azure settings first.&apos;)
+                    }
+                    echo &apos;Deployment is disabled for this run. CI validation is complete.&apos;
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh &apos;&apos;&apos;
+                rm -rf &quot;$WORKSPACE/jenkins_artifacts&quot;
+                cp -R &quot;$PROJECT_ROOT/jenkins_artifacts&quot; &quot;$WORKSPACE/jenkins_artifacts&quot; 2&gt;/dev/null || true
+            &apos;&apos;&apos;
+            archiveArtifacts artifacts: &apos;jenkins_artifacts/**&apos;, allowEmptyArchive: true, fingerprint: true
+        }
+    }
+}
+</script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>
