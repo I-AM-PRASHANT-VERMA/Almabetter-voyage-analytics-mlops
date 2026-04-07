@@ -1,0 +1,299 @@
+
+pipeline {
+    // Run on the available Jenkins agent because this local pipeline is workspace-driven.
+    agent any
+
+    // -----------------------------
+    // 1. Jenkins run behavior
+    // -----------------------------
+    options {
+        // Show timestamps so validation and Docker logs are easier to trace.
+        timestamps()
+        // Avoid two builds changing the same local Docker services at the same time.
+        disableConcurrentBuilds()
+    }
+
+    // -----------------------------
+    // 2. Manual pipeline switches
+    // -----------------------------
+    parameters {
+        // Keep image building optional because the normal CI check should stay lightweight.
+        booleanParam(name: 'BUILD_DOCKER_IMAGES', defaultValue: false, description: 'Build all local Docker images after CI validation.')
+        // Local CD is a separate manual choice because it restarts containers on this machine.
+        booleanParam(name: 'RUN_LOCAL_CD', defaultValue: false, description: 'Restart local Docker containers and verify app health after image build.')
+        // Cloud deployment is intentionally gated in this local Jenkinsfile.
+        booleanParam(name: 'ENABLE_DEPLOYMENT', defaultValue: false, description: 'Reserved for Kubernetes or Azure deployment after local checks are confirmed.')
+    }
+
+    // -----------------------------
+    // 3. Shared Jenkins paths
+    // -----------------------------
+    environment {
+        // Keep Python logs visible immediately in the Jenkins console.
+        PYTHONUNBUFFERED = '1'
+        // Use a workspace-local virtual environment so dependencies do not leak globally.
+        VENV_DIR = "${WORKSPACE}/.jenkins-venv"
+        // Store validation reports in one folder so Jenkins can archive them.
+        JENKINS_OUTPUT_DIR = "${WORKSPACE}/jenkins_artifacts"
+        // Windows host path used when Jenkins triggers Docker Desktop local services.
+        HOST_PROJECT_ROOT = 'E:\\E almabetter projects\\1 Voyage_Analytics_MLOps\\MLops pipeline'
+        // Local training outputs live outside the MLOps pipeline folder.
+        LOCAL_TRAINING_DIR = "${WORKSPACE}/../local_training"
+    }
+
+    stages {
+        // -----------------------------
+        // 4. Confirm Jenkins agent is usable
+        // -----------------------------
+        stage('Agent Check') {
+            steps {
+                script {
+                    // The shell steps below expect Linux-style sh and Python commands.
+                    if (!isUnix()) {
+                        error('This Jenkinsfile expects a Linux or WSL-style Jenkins agent with Python 3.')
+                    }
+                }
+
+                sh '''
+                    set -e
+                    # Print Python version and prepare the artifact folder for later stages.
+                    python3 --version
+                    mkdir -p "$JENKINS_OUTPUT_DIR"
+                '''
+            }
+        }
+
+        // -----------------------------
+        // 5. Confirm required project files exist
+        // -----------------------------
+        stage('Workspace Check') {
+            steps {
+                sh '''
+                    set -e
+
+                    # Fail early if any file needed by CI validation or serving is missing.
+                    test -f Jenkinsfile
+                    test -f docker-compose.yml
+                    test -f requirements.txt
+                    test -f scripts/validate_jenkins_ci.py
+                    test -f scripts/validate_flight_regression_workflow.py
+                    test -f scripts/check_flight_dataset_drift.py
+                    test -f "$LOCAL_TRAINING_DIR/train_flight_price.py"
+                    test -f "$LOCAL_TRAINING_DIR/requirements.txt"
+                    test -f "$LOCAL_TRAINING_DIR/outputs/models/flight_price_model_latest.joblib"
+                    test -f "$LOCAL_TRAINING_DIR/outputs/metrics/flight_price_model_latest_metadata.json"
+                    test -f airflow/dags/flight_price_mlflow_training_pipeline.py
+                    test -f "joblib files/flight_price_model.joblib"
+                    test -f "joblib files/flight_price_model_metadata.json"
+                    test -f "joblib files/hotel_recommender_latest.joblib"
+                    test -f "joblib files/gender_classifier_model_latest.joblib"
+                '''
+            }
+        }
+
+        // -----------------------------
+        // 6. Install Python dependencies
+        // -----------------------------
+        stage('Set Up Python') {
+            steps {
+                sh '''
+                    set -e
+
+                    # Recreate the virtual environment so each Jenkins run starts clean.
+                    rm -rf "$VENV_DIR"
+                    python3 -m venv "$VENV_DIR"
+
+                    # Install the same project requirements used by the validators.
+                    . "$VENV_DIR/bin/activate"
+                    python -m pip install --upgrade pip
+                    pip install -r requirements.txt
+                '''
+            }
+        }
+
+        // -----------------------------
+        // 7. Run model and project validation
+        // -----------------------------
+        stage('Jenkins CI Validation') {
+            steps {
+                sh '''
+                    set -e
+                    . "$VENV_DIR/bin/activate"
+
+                    # Run broad project checks first, then the dedicated flight workflow validator.
+                    python scripts/validate_jenkins_ci.py --output-dir "$JENKINS_OUTPUT_DIR/ci_validation"
+                    python scripts/validate_flight_regression_workflow.py --output-dir "$JENKINS_OUTPUT_DIR/flight_validation"
+                '''
+            }
+        }
+
+        // -----------------------------
+        // 8. Validate Docker Compose
+        // -----------------------------
+        stage('Docker Compose Config') {
+            steps {
+                script {
+                    // Docker is optional for normal CI, but required when image build or local CD is requested.
+                    def dockerStatus = sh(script: 'docker --version >/dev/null 2>&1 && docker compose version >/dev/null 2>&1', returnStatus: true)
+
+                    if (dockerStatus != 0 && (params.BUILD_DOCKER_IMAGES || params.RUN_LOCAL_CD)) {
+                        error('Docker is required for the requested Jenkins CD run, but it is not available on this Jenkins agent.')
+                    } else if (dockerStatus != 0) {
+                        echo 'Docker is not available on this Jenkins agent. Docker config validation is skipped.'
+                        sh '''
+                            set -e
+                            cat > "$JENKINS_OUTPUT_DIR/docker-validation-note.txt" <<'EOF'
+Docker validation was skipped because Docker was not available on this Jenkins agent.
+The Python model checks and project file checks were still completed.
+EOF
+                        '''
+                    } else {
+                        sh '''
+                            set -e
+                            # Save the resolved Compose file as evidence of the local container configuration.
+                            docker --version
+                            docker compose version
+                            docker compose config > "$JENKINS_OUTPUT_DIR/docker-compose-resolved.yml"
+                        '''
+                    }
+                }
+            }
+        }
+
+        // -----------------------------
+        // 9. Build serving images when requested
+        // -----------------------------
+        stage('Docker Build') {
+            when {
+                expression { params.BUILD_DOCKER_IMAGES || params.RUN_LOCAL_CD }
+            }
+            steps {
+                sh '''
+                    set -e
+
+                    # Build only the serving images; training images stay separate from this local CI pipeline.
+                    docker compose build \
+                        flight-api flight-streamlit \
+                        hotel-api hotel-streamlit \
+                        gender-api gender-streamlit
+                '''
+            }
+        }
+
+        // -----------------------------
+        // 10. Restart local Docker apps when requested
+        // -----------------------------
+        stage('Local Docker CD') {
+            when {
+                expression { params.RUN_LOCAL_CD }
+            }
+            steps {
+                sh '''
+                    set -e
+
+                    # Jenkins runs inside Linux, so this override points container mounts back to the Windows host path.
+                    cat > "$JENKINS_OUTPUT_DIR/docker-compose.jenkins-cd.yml" <<YAML
+services:
+  flight-api:
+    volumes:
+      - '${HOST_PROJECT_ROOT}\\dataset:/app/dataset:ro'
+      - '${HOST_PROJECT_ROOT}\\joblib files:/app/joblib files:ro'
+  flight-streamlit:
+    volumes:
+      - '${HOST_PROJECT_ROOT}\\dataset:/app/dataset:ro'
+      - '${HOST_PROJECT_ROOT}\\joblib files:/app/joblib files:ro'
+      - '${HOST_PROJECT_ROOT}\\.streamlit:/app/.streamlit:ro'
+  hotel-api:
+    volumes:
+      - '${HOST_PROJECT_ROOT}\\dataset:/app/dataset:ro'
+      - '${HOST_PROJECT_ROOT}\\joblib files:/app/joblib files:ro'
+  hotel-streamlit:
+    volumes:
+      - '${HOST_PROJECT_ROOT}\\dataset:/app/dataset:ro'
+      - '${HOST_PROJECT_ROOT}\\joblib files:/app/joblib files:ro'
+      - '${HOST_PROJECT_ROOT}\\.streamlit:/app/.streamlit:ro'
+  gender-api:
+    volumes:
+      - '${HOST_PROJECT_ROOT}\\dataset:/app/dataset:ro'
+      - '${HOST_PROJECT_ROOT}\\joblib files:/app/joblib files:ro'
+  gender-streamlit:
+    volumes:
+      - '${HOST_PROJECT_ROOT}\\dataset:/app/dataset:ro'
+      - '${HOST_PROJECT_ROOT}\\joblib files:/app/joblib files:ro'
+      - '${HOST_PROJECT_ROOT}\\.streamlit:/app/.streamlit:ro'
+YAML
+
+                    # Start the local app services after the images and mounts are prepared.
+                    docker compose -f docker-compose.yml -f "$JENKINS_OUTPUT_DIR/docker-compose.jenkins-cd.yml" up -d \
+                        flight-api flight-streamlit \
+                        hotel-api hotel-streamlit \
+                        gender-api gender-streamlit
+
+                    python3 - <<'PY'
+import json
+import time
+import urllib.request
+
+checks = {
+    "flight_api_health": "http://host.docker.internal:5002/health",
+    "hotel_api_health": "http://host.docker.internal:5001/health",
+    "gender_api_health": "http://host.docker.internal:5003/health",
+    "flight_streamlit_health": "http://host.docker.internal:8501/app/flight/_stcore/health",
+    "hotel_streamlit_health": "http://host.docker.internal:8502/app/hotel/_stcore/health",
+    "gender_streamlit_health": "http://host.docker.internal:8503/app/gender/_stcore/health",
+}
+
+status = {}
+# Retry health checks because Streamlit and Flask containers may need a little startup time.
+for attempt in range(1, 19):
+    failed = []
+    for name, url in checks.items():
+        try:
+            with urllib.request.urlopen(url, timeout=10) as response:
+                status[name] = response.status
+        except Exception as error:
+            status[name] = str(error)
+            failed.append(name)
+    if not failed:
+        break
+    time.sleep(10)
+else:
+    raise SystemExit(f"Local Docker CD health checks failed: {status}")
+
+with open("jenkins_artifacts/local_cd_health_summary.json", "w", encoding="utf-8") as file:
+    json.dump(status, file, indent=4)
+
+print("Local Docker CD health checks passed.")
+print(json.dumps(status, indent=4))
+PY
+                '''
+            }
+        }
+
+        // -----------------------------
+        // 11. Keep cloud deployment gated
+        // -----------------------------
+        stage('Deployment Gate') {
+            steps {
+                script {
+                    // This Jenkinsfile stops before cloud deployment; the Azure CD pipeline handles that separately.
+                    if (params.ENABLE_DEPLOYMENT) {
+                        error('Deployment is intentionally not wired yet. Confirm Kubernetes and Azure settings before enabling this stage.')
+                    }
+
+                    echo 'Deployment is disabled for this Jenkins run. CI validation is complete.'
+                }
+            }
+        }
+    }
+
+    // -----------------------------
+    // 12. Archive Jenkins evidence
+    // -----------------------------
+    post {
+        always {
+            // Archive validation and local CD evidence even when a later stage fails.
+            archiveArtifacts artifacts: 'jenkins_artifacts/**', allowEmptyArchive: true, fingerprint: true
+        }
+    }
+}
