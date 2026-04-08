@@ -1,0 +1,12 @@
+# ========================================================================
+
+# -----------------------------
+# 1. Azure AKS namespace
+# -----------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: voyage-mlops
+  labels:
+    app.kubernetes.io/part-of: voyage-analytics-mlops
+    environment: azure-aks

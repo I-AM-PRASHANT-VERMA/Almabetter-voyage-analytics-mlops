@@ -1,0 +1,282 @@
+# ========================================================================
+
+# -----------------------------
+# 1. Gateway ConfigMap
+# -----------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  # Store the nginx gateway config inside Kubernetes so the deployment stays self-contained.
+  name: voyage-gateway-nginx
+  namespace: voyage-mlops
+  labels:
+    # Label the config so it is easy to identify in the cluster.
+    app: voyage-gateway
+    # Keep the shared project grouping label with the rest of the resources.
+    app.kubernetes.io/part-of: voyage-analytics-mlops
+data:
+  nginx.conf: |
+    # Keep nginx on a small worker footprint for this AKS project gateway.
+    worker_processes  1;
+
+    # Let nginx keep a normal number of in-cluster connections open.
+    events {
+        worker_connections  1024;
+    }
+
+    # Put all reverse-proxy routing inside the standard HTTP block.
+    http {
+        # Map websocket upgrades cleanly because Streamlit uses websocket traffic.
+        map $http_upgrade $connection_upgrade {
+            default upgrade;
+            ''      close;
+        }
+
+        # Route flight API calls to the internal Kubernetes service.
+        upstream flight_api_backend {
+            server flight-api:80;
+        }
+
+        # Route hotel API calls to the internal Kubernetes service.
+        upstream hotel_api_backend {
+            server hotel-api:80;
+        }
+
+        # Route gender API calls to the internal Kubernetes service.
+        upstream gender_api_backend {
+            server gender-api:80;
+        }
+
+        # Route the flight Streamlit UI to the internal Kubernetes service.
+        upstream flight_app_backend {
+            server flight-streamlit:80;
+        }
+
+        # Route the hotel Streamlit UI to the internal Kubernetes service.
+        upstream hotel_app_backend {
+            server hotel-streamlit:80;
+        }
+
+        # Route the gender Streamlit UI to the internal Kubernetes service.
+        upstream gender_app_backend {
+            server gender-streamlit:80;
+        }
+
+        # Expose one browser-facing HTTP server for every routed path.
+        server {
+            # Listen on the default HTTP port inside the gateway container.
+            listen 80;
+
+            # Keep the default hostname simple for load balancer traffic.
+            server_name _;
+
+            # Provide one direct health endpoint for Kubernetes probes and smoke tests.
+            location = /health {
+                add_header Content-Type text/plain;
+                return 200 "ok\n";
+            }
+
+            # Send the bare root to the main flight app page so the entry point feels intentional.
+            location = / {
+                return 302 /app/flight/;
+            }
+
+            # Normalize the flight app base path so users can omit the trailing slash.
+            location = /app/flight {
+                return 301 /app/flight/;
+            }
+
+            # Proxy the entire flight Streamlit app without stripping its base path.
+            location /app/flight/ {
+                proxy_pass http://flight_app_backend;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection $connection_upgrade;
+            }
+
+            # Normalize the hotel app base path so users can omit the trailing slash.
+            location = /app/hotel {
+                return 301 /app/hotel/;
+            }
+
+            # Proxy the full hotel Streamlit app with websocket-friendly headers.
+            location /app/hotel/ {
+                proxy_pass http://hotel_app_backend;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection $connection_upgrade;
+            }
+
+            # Normalize the gender app base path so users can omit the trailing slash.
+            location = /app/gender {
+                return 301 /app/gender/;
+            }
+
+            # Proxy the full gender Streamlit app with websocket-friendly headers.
+            location /app/gender/ {
+                proxy_pass http://gender_app_backend;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection $connection_upgrade;
+            }
+
+            # Redirect the short flight API path to the canonical slash form.
+            location = /api/flight {
+                return 301 /api/flight/;
+            }
+
+            # Strip the external prefix before passing flight API requests to Flask.
+            location /api/flight/ {
+                rewrite ^/api/flight/?(.*)$ /$1 break;
+                proxy_pass http://flight_api_backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }
+
+            # Redirect the short hotel API path to the canonical slash form.
+            location = /api/hotel {
+                return 301 /api/hotel/;
+            }
+
+            # Strip the external prefix before passing hotel API requests to Flask.
+            location /api/hotel/ {
+                rewrite ^/api/hotel/?(.*)$ /$1 break;
+                proxy_pass http://hotel_api_backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }
+
+            # Redirect the short gender API path to the canonical slash form.
+            location = /api/gender {
+                return 301 /api/gender/;
+            }
+
+            # Strip the external prefix before passing gender API requests to Flask.
+            location /api/gender/ {
+                rewrite ^/api/gender/?(.*)$ /$1 break;
+                proxy_pass http://gender_api_backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }
+        }
+    }
+---
+# -----------------------------
+# 2. Gateway Deployment
+# -----------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Deploy one shared gateway that becomes the single public entry point.
+  name: voyage-gateway
+  namespace: voyage-mlops
+  labels:
+    app: voyage-gateway
+    app.kubernetes.io/part-of: voyage-analytics-mlops
+spec:
+  # One replica is enough for the current demo cluster size.
+  replicas: 1
+  strategy:
+    # Recreate keeps updates predictable on the small node pool.
+    type: Recreate
+  selector:
+    matchLabels:
+      # Match the pod label used by the template below.
+      app: voyage-gateway
+  template:
+    metadata:
+      labels:
+        # Apply the same selector label directly to the pod.
+        app: voyage-gateway
+        # Keep the project grouping label on the pod metadata too.
+        app.kubernetes.io/part-of: voyage-analytics-mlops
+    spec:
+      containers:
+        - name: voyage-gateway
+          # Use the standard nginx image because the config carries all custom behavior.
+          image: nginx:1.27-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              # Name the HTTP port so the service wiring stays readable.
+              name: http
+          # Attach persistent or shared files needed by the workload.
+          volumeMounts:
+            - name: gateway-config
+              # Replace the default nginx config with the project routing config.
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+          readinessProbe:
+            httpGet:
+              # Probe the lightweight gateway health route for readiness.
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              # Probe the same route for liveness so nginx restarts if it hangs.
+              path: /health
+              port: 80
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              # Reserve a small CPU slice because nginx is light.
+              cpu: 100m
+              # Reserve a small memory slice for the same reason.
+              memory: 128Mi
+            limits:
+              # Cap CPU because this gateway just forwards requests.
+              cpu: 250m
+              # Cap memory to keep the node stable.
+              memory: 256Mi
+      # Attach persistent or shared files needed by the workload.
+      volumes:
+        - name: gateway-config
+          # Mount the ConfigMap as the nginx config source.
+          configMap:
+            name: voyage-gateway-nginx
+---
+# -----------------------------
+# 3. Gateway Service
+# -----------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  # Expose the shared gateway as the only public service entry point.
+  name: voyage-gateway
+  namespace: voyage-mlops
+  labels:
+    app: voyage-gateway
+    app.kubernetes.io/part-of: voyage-analytics-mlops
+spec:
+  # Publish one external IP so all app and API paths live behind the same endpoint.
+  type: LoadBalancer
+  selector:
+    # Send external traffic only to the gateway pods.
+    app: voyage-gateway
+  ports:
+    - name: http
+      # Expose standard HTTP from the Azure load balancer.
+      port: 80
+      # Forward that port to nginx inside the gateway pod.
+      targetPort: 80

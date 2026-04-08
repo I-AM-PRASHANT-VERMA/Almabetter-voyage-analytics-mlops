@@ -1,0 +1,25 @@
+# ========================================================================
+
+# -----------------------------
+# 1. Azure AKS resource list
+# -----------------------------
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Create or reuse the shared namespace first.
+  - namespace.yaml
+  # Keep the flight API in the Azure deployment bundle.
+  - flight-api.yaml
+  # Keep the flight Streamlit UI in the Azure deployment bundle.
+  - flight-streamlit.yaml
+  # Add the hotel API to the same Azure deployment bundle.
+  - hotel-api.yaml
+  # Add the hotel Streamlit UI to the same Azure deployment bundle.
+  - hotel-streamlit.yaml
+  # Add the gender API to the same Azure deployment bundle.
+  - gender-api.yaml
+  # Add the gender Streamlit UI to the same Azure deployment bundle.
+  - gender-streamlit.yaml
+  # Add the shared gateway so Azure exposes one common public entry point.
+  - voyage-gateway.yaml
