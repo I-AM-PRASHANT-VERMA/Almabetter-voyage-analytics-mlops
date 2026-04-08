@@ -1,0 +1,117 @@
+# -----------------------------
+# 1. Flight Streamlit deployment
+# -----------------------------
+# This deployment runs the browser-facing flight price dashboard.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Keep the deployment name aligned with the app and service naming.
+  name: flight-streamlit
+  # Use the shared namespace so the gateway can reach this UI over cluster DNS.
+  namespace: voyage-mlops
+  labels:
+    # Label the deployment with the app name for selectors and dashboards.
+    app: flight-streamlit
+    # Mark the workload as part of the common Voyage Analytics project.
+    app.kubernetes.io/part-of: voyage-analytics-mlops
+spec:
+  # One replica is enough for the current demo cluster size.
+  replicas: 1
+  strategy:
+    # Recreate avoids rollout blocking on the single small AKS node.
+    type: Recreate
+  selector:
+    matchLabels:
+      # Match the pod label set in the template below.
+      app: flight-streamlit
+  template:
+    metadata:
+      labels:
+        # Apply the app label directly on the pod for the service selector.
+        app: flight-streamlit
+        # Keep the project grouping label on the pod metadata too.
+        app.kubernetes.io/part-of: voyage-analytics-mlops
+    spec:
+      containers:
+        - name: flight-streamlit
+          # Pull the flight Streamlit image from the same Azure Container Registry path family.
+          image: acrvoyagemlopsv2.azurecr.io/voyage-v2/flight-streamlit:1f1f99b80a7d
+          # Reuse the cached node image when the same tag is already present.
+          imagePullPolicy: IfNotPresent
+          ports:
+            # Streamlit listens on 8501 inside the container.
+            - containerPort: 8501
+              # Name the HTTP port so the service wiring stays readable.
+              name: http
+          env:
+            - name: FLIGHT_PRICE_API_URL
+              # Call the internal flight API service instead of an external URL.
+              value: http://flight-api:80
+            - name: APP_ENVIRONMENT
+              # Tag the runtime so monitoring can separate local and AKS traffic.
+              value: azure-aks
+            - name: OTEL_SERVICE_NAME
+              # Give telemetry a distinct service name for this UI.
+              value: flight-streamlit-aks
+            - name: APPLICATIONINSIGHTS_CONNECTION_STRING
+              # Read the shared telemetry connection string from the Kubernetes secret.
+              valueFrom:
+                secretKeyRef:
+                  name: appinsights-connection
+                  key: connection-string
+          args:
+            # Force Streamlit to serve from the shared gateway path.
+            - --server.baseUrlPath=app/flight
+          readinessProbe:
+            # Readiness waits until the dashboard can answer through its base path.
+            httpGet:
+              # Probe the Streamlit health route under the flight base path.
+              path: /app/flight/_stcore/health
+              port: 8501
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          livenessProbe:
+            # Liveness restarts the pod if the Streamlit server becomes unhealthy.
+            httpGet:
+              # Probe the same base-path-aware Streamlit route for liveness.
+              path: /app/flight/_stcore/health
+              port: 8501
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              # Reserve a modest CPU slice for the AKS scheduler.
+              cpu: 250m
+              # Reserve enough memory for Streamlit plus the model assets.
+              memory: 512Mi
+            limits:
+              # Cap CPU so one UI pod does not take over the whole node.
+              cpu: "1"
+              # Cap memory to keep the node stable under pressure.
+              memory: 1Gi
+---
+# -----------------------------
+# 2. Flight Streamlit service
+# -----------------------------
+# The service gives the gateway a stable internal DNS name for the dashboard pod.
+apiVersion: v1
+kind: Service
+metadata:
+  # Keep the internal service name short because the gateway will route to it.
+  name: flight-streamlit
+  namespace: voyage-mlops
+  labels:
+    app: flight-streamlit
+    app.kubernetes.io/part-of: voyage-analytics-mlops
+spec:
+  # Keep the backend service internal because the gateway will be the only public entry point.
+  type: ClusterIP
+  selector:
+    # Send traffic only to pods labeled as the flight Streamlit UI.
+    app: flight-streamlit
+  ports:
+    - name: http
+      # Expose a clean cluster port for the gateway.
+      port: 80
+      # Forward that cluster port to the Streamlit container port.
+      targetPort: 8501

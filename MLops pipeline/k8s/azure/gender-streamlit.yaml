@@ -1,0 +1,112 @@
+
+# -----------------------------
+# 1. Gender Streamlit deployment
+# -----------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Keep the deployment name aligned with the app and service naming.
+  name: gender-streamlit
+  # Use the shared namespace so the gateway can reach this UI over cluster DNS.
+  namespace: voyage-mlops
+  labels:
+    # Label the deployment with the app name for selectors and dashboards.
+    app: gender-streamlit
+    # Mark the workload as part of the common Voyage Analytics project.
+    app.kubernetes.io/part-of: voyage-analytics-mlops
+spec:
+  # One replica is enough for the current demo cluster size.
+  replicas: 1
+  strategy:
+    # Recreate avoids rollout blocking on the single small AKS node.
+    type: Recreate
+  selector:
+    matchLabels:
+      # Match the pod label set in the template below.
+      app: gender-streamlit
+  template:
+    metadata:
+      labels:
+        # Apply the app label directly on the pod for the service selector.
+        app: gender-streamlit
+        # Keep the project grouping label on the pod metadata too.
+        app.kubernetes.io/part-of: voyage-analytics-mlops
+    spec:
+      containers:
+        - name: gender-streamlit
+          # Pull the gender Streamlit image from the same Azure Container Registry path family.
+          image: acrvoyagemlopsv2.azurecr.io/voyage-v2/gender-streamlit:latest
+          # Reuse the cached node image when the same tag is already present.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8503
+              # Name the HTTP port so the service wiring stays readable.
+              name: http
+          command:
+            # Start the gender Streamlit entry point explicitly because the shared image default is flight.
+            - streamlit
+            - run
+            - streamlit/gender_classification_app.py
+            - --server.address=0.0.0.0
+            - --server.port=8503
+            - --server.baseUrlPath=app/gender
+          env:
+            - name: APP_ENVIRONMENT
+              # Tag the runtime so monitoring can separate local and AKS traffic.
+              value: azure-aks
+            - name: OTEL_SERVICE_NAME
+              # Give telemetry a distinct service name for this UI.
+              value: gender-streamlit-aks
+            - name: APPLICATIONINSIGHTS_CONNECTION_STRING
+              # Read the shared telemetry connection string from the Kubernetes secret.
+              valueFrom:
+                secretKeyRef:
+                  name: appinsights-connection
+                  key: connection-string
+          readinessProbe:
+            httpGet:
+              # Use the base-path-aware Streamlit health route for readiness.
+              path: /app/gender/_stcore/health
+              port: 8503
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              # Use the same base-path-aware Streamlit health route for liveness.
+              path: /app/gender/_stcore/health
+              port: 8503
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              # Reserve a modest CPU slice for the AKS scheduler.
+              cpu: 250m
+              # Reserve enough memory for Streamlit plus the model assets.
+              memory: 512Mi
+            limits:
+              # Cap CPU so one UI pod does not take over the whole node.
+              cpu: "1"
+              # Cap memory to keep the node stable under pressure.
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # Keep the internal service name short because the gateway will route to it.
+  name: gender-streamlit
+  namespace: voyage-mlops
+  labels:
+    app: gender-streamlit
+    app.kubernetes.io/part-of: voyage-analytics-mlops
+spec:
+  # Keep the backend service internal because the gateway will be the only public entry point.
+  type: ClusterIP
+  selector:
+    # Send traffic only to pods labeled as the gender Streamlit UI.
+    app: gender-streamlit
+  ports:
+    - name: http
+      # Expose a clean cluster port for the gateway.
+      port: 80
+      # Forward that cluster port to the Streamlit container port.
+      targetPort: 8503

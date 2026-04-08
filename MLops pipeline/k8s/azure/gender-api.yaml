@@ -1,0 +1,111 @@
+
+# -----------------------------
+# 1. Gender API deployment
+# -----------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Keep the deployment name aligned with the existing app naming convention.
+  name: gender-api
+  # Use the shared namespace so every project app can talk over internal DNS.
+  namespace: voyage-mlops
+  labels:
+    # Label the workload with the app name for selectors and dashboards.
+    app: gender-api
+    # Mark this workload as part of the same MLOps project bundle.
+    app.kubernetes.io/part-of: voyage-analytics-mlops
+spec:
+  # One replica is enough for the current demo cluster size.
+  replicas: 1
+  strategy:
+    # Recreate avoids rollout deadlocks on the small AKS node.
+    type: Recreate
+  selector:
+    matchLabels:
+      # Match the pod label used by the template below.
+      app: gender-api
+  template:
+    metadata:
+      labels:
+        # Apply the same selector label directly to the pod.
+        app: gender-api
+        # Keep the project grouping label on the pod metadata too.
+        app.kubernetes.io/part-of: voyage-analytics-mlops
+    spec:
+      containers:
+        - name: gender-api
+          # Pull the gender API image from the same Azure Container Registry path family.
+          image: acrvoyagemlopsv2.azurecr.io/voyage-v2/gender-api:latest
+          # Reuse the cached node image when the same tag is already present.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5003
+              # Name the HTTP port so probes and service wiring stay readable.
+              name: http
+          command:
+            # Start the gender Flask app explicitly because the shared image default is the flight app.
+            - python
+            - flask_apps/gender_classification_flask_app/app.py
+          env:
+            - name: PYTHONUNBUFFERED
+              # Flush logs immediately so debugging in AKS stays straightforward.
+              value: "1"
+            - name: APP_ENVIRONMENT
+              # Tag the running environment for monitoring and app behavior.
+              value: azure-aks
+            - name: OTEL_SERVICE_NAME
+              # Give Application Insights a distinct service name for this workload.
+              value: gender-api-aks
+            - name: APPLICATIONINSIGHTS_CONNECTION_STRING
+              # Read the shared telemetry connection string from the Kubernetes secret.
+              valueFrom:
+                secretKeyRef:
+                  name: appinsights-connection
+                  key: connection-string
+          readinessProbe:
+            httpGet:
+              # Use the normal Flask health route for readiness.
+              path: /health
+              port: 5003
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              # Use the same Flask health route for liveness.
+              path: /health
+              port: 5003
+            initialDelaySeconds: 45
+            periodSeconds: 30
+          resources:
+            requests:
+              # Reserve a modest CPU slice for the AKS scheduler.
+              cpu: 250m
+              # Reserve enough memory for Flask plus the classifier assets.
+              memory: 512Mi
+            limits:
+              # Cap CPU so one pod does not take over the whole node.
+              cpu: "1"
+              # Cap memory to keep the node stable under pressure.
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # Keep the internal service name short because the gateway will route to it.
+  name: gender-api
+  namespace: voyage-mlops
+  labels:
+    app: gender-api
+    app.kubernetes.io/part-of: voyage-analytics-mlops
+spec:
+  # Keep the backend service internal because the gateway will be the only public entry point.
+  type: ClusterIP
+  selector:
+    # Send traffic only to pods labeled as the gender API.
+    app: gender-api
+  ports:
+    - name: http
+      # Expose a simple port 80 inside the cluster for clean gateway routing.
+      port: 80
+      # Forward that cluster port to the Flask container port.
+      targetPort: 5003
