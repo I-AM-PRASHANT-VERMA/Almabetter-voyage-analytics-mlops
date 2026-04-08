@@ -1,0 +1,22 @@
+# ========================================================================
+
+# -----------------------------
+# 1. Shared model PVC
+# -----------------------------
+# PVC for the saved flight model and metadata file.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flight-model-pvc
+  labels:
+    app.kubernetes.io/name: flight-model-storage
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  # One node writing at a time is enough for this local demo setup.
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # Small storage request because the joblib artifacts are lightweight.
+      storage: 1Gi
+---
