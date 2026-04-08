@@ -1,0 +1,66 @@
+# ========================================================================
+
+# -----------------------------
+# 1. Flight training job
+# -----------------------------
+# Manual training job for refreshing the flight model inside the cluster.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: flight-training
+  # Pin the job to the same namespace used by the serving stack.
+  namespace: voyage-mlops
+  labels:
+    app.kubernetes.io/name: flight-training
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  # One retry is enough here because repeated failures usually point to config issues.
+  backoffLimit: 1
+  # Clean the finished job up after a short window so demo clusters do not fill up with old jobs.
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: flight-training
+        app.kubernetes.io/name: flight-training
+        app.kubernetes.io/part-of: voyage-flight-mlops
+    spec:
+      # This is a run-once batch job, so the pod should not restart forever.
+      restartPolicy: Never
+      containers:
+        - name: flight-training
+          # Reuse the same image that already holds the training script and model dependencies.
+          image: 1-project-voyage-analytics-flight-validation:k8s-local-20260610c
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+          args:
+            # Run the same local MLflow experiment script used by the Docker workflow.
+            - scripts/run_flight_price_mlflow_experiments.py
+            - --profile
+            - quick
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: MLFLOW_ALLOW_FILE_STORE
+              value: "true"
+          # Attach persistent or shared files needed by the workload.
+          volumeMounts:
+            # The job writes the refreshed joblib artifact here for the API to read later.
+            - name: model-storage
+              mountPath: /app/joblib files
+          resources:
+            requests:
+              # Keep the resource request modest for local-cluster demos.
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              # Give training extra headroom so XGBoost has room to finish cleanly.
+              cpu: "2"
+              memory: 4Gi
+      # Attach persistent or shared files needed by the workload.
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            # Shared PVC that holds the serving artifact.
+            claimName: flight-model-pvc
