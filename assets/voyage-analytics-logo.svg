@@ -1,0 +1,15 @@
+<svg width="220" height="220" viewBox="0 0 220 220" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Voyage Analytics Logo</title>
+  <desc id="desc">A simple logo combining a flight path and analytics bars.</desc>
+  <rect width="220" height="220" rx="44" fill="#0F172A"/>
+  <circle cx="110" cy="110" r="76" fill="#0E7490" opacity="0.18"/>
+  <path d="M48 145C75 116 101 125 122 98C139 77 160 72 182 82" stroke="#38BDF8" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="48" cy="145" r="7" fill="#FACC15"/>
+  <circle cx="122" cy="98" r="7" fill="#22C55E"/>
+  <circle cx="182" cy="82" r="7" fill="#38BDF8"/>
+  <path d="M78 87L119 67L106 102L78 87Z" fill="white"/>
+  <path d="M88 139V164" stroke="white" stroke-width="10" stroke-linecap="round"/>
+  <path d="M112 124V164" stroke="white" stroke-width="10" stroke-linecap="round"/>
+  <path d="M136 110V164" stroke="white" stroke-width="10" stroke-linecap="round"/>
+  <path d="M72 171H150" stroke="#CBD5E1" stroke-width="6" stroke-linecap="round"/>
+</svg>
