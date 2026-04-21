@@ -1,4 +1,6 @@
 import os
+import logging
+import sys
 
 from pathlib import Path
 
@@ -10,10 +12,20 @@ import requests
 
 import streamlit as st
 
+BASE_DIR = Path(__file__).resolve().parents[1]
+
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+
+from monitoring import configure_service_monitoring
+
+
+configure_service_monitoring("flight-streamlit")
+LOGGER = logging.getLogger("voyage.flight_streamlit")
+
 
 st.set_page_config(page_title="Flight Price Prediction", layout="wide")
-
-BASE_DIR = Path(__file__).resolve().parents[1]
 
 # Keep the Streamlit app on the same saved artifact used by the Flask API.
 MODEL_PATH = BASE_DIR / "joblib files" / "flight_price_model.joblib"
@@ -91,6 +103,10 @@ def load_api_model_info():
         return response.json()
 
     except requests.RequestException:
+        LOGGER.warning(
+            "Sidebar model info could not be loaded from the API.",
+            extra={"event": "model_info_unavailable", "service_name": "flight-streamlit"},
+        )
         return {}
 
 
@@ -574,10 +590,20 @@ try:
 
     agency_summary_df["avg_time"] = agency_summary_df["avg_time"].round(2)
 except FileNotFoundError as error:
+    LOGGER.error(
+        "Streamlit startup failed because a runtime file is missing.",
+        extra={"event": "dashboard_startup_missing_file", "service_name": "flight-streamlit"},
+        exc_info=error,
+    )
     st.error("The flight dashboard could not start because a required runtime file is missing.")
     st.code(str(error))
     st.stop()
 except Exception as error:
+    LOGGER.exception(
+        "Streamlit startup failed while loading dashboard data.",
+        extra={"event": "dashboard_startup_failed", "service_name": "flight-streamlit"},
+        exc_info=error,
+    )
     st.error("The flight dashboard could not finish loading the dataset and summary views.")
     with st.expander("Open startup details", expanded=False):
         st.write(str(error))
@@ -732,32 +758,68 @@ if submitted:
         st.session_state.flight_predicted_price_v3 = predicted_price
         st.session_state.flight_input_preview_v3 = prediction_input_df
         st.session_state.pop("flight_prediction_error_v3", None)
+        LOGGER.info(
+            "Prediction generated.",
+            extra={
+                "event": "flight_prediction_generated",
+                "service_name": "flight-streamlit",
+                "prediction_source": "api" if use_flight_api() else "local_model",
+                "departure_city": departure_city,
+                "arrival_city": arrival_city,
+                "flight_type": flight_type,
+            },
+        )
 
     except ModuleNotFoundError as error:
+        LOGGER.error(
+            "Prediction failed because xgboost is not installed.",
+            extra={"event": "prediction_dependency_missing", "service_name": "flight-streamlit"},
+            exc_info=error,
+        )
         st.session_state.flight_prediction_error_v3 = (
             "Prediction could not start because the `xgboost` package is not installed.",
             str(error),
         )
 
     except requests.RequestException as error:
+        LOGGER.warning(
+            "Prediction failed because the Flask API was unreachable.",
+            extra={"event": "prediction_api_unreachable", "service_name": "flight-streamlit"},
+            exc_info=error,
+        )
         st.session_state.flight_prediction_error_v3 = (
             "The app could not connect to the Flask API for prediction.",
             str(error),
         )
 
     except RuntimeError as error:
+        LOGGER.warning(
+            "Prediction request was rejected by the Flask API.",
+            extra={"event": "prediction_api_rejected", "service_name": "flight-streamlit"},
+            exc_info=error,
+        )
         st.session_state.flight_prediction_error_v3 = (
             "The Flask API rejected the prediction request.",
             str(error),
         )
 
     except FileNotFoundError as error:
+        LOGGER.error(
+            "Prediction failed because the model artifact is missing.",
+            extra={"event": "prediction_model_missing", "service_name": "flight-streamlit"},
+            exc_info=error,
+        )
         st.session_state.flight_prediction_error_v3 = (
             "The saved model file is not available in this runtime.",
             str(error),
         )
 
     except Exception as error:
+        LOGGER.exception(
+            "Prediction failed with an unexpected error.",
+            extra={"event": "prediction_unexpected_error", "service_name": "flight-streamlit"},
+            exc_info=error,
+        )
         st.session_state.flight_prediction_error_v3 = (
             "The app could not generate a prediction from the saved model.",
             str(error),

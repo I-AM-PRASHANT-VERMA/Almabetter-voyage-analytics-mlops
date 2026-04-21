@@ -1,6 +1,7 @@
 import math
 
 import sys
+import logging
 
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from flask_apps.common import (
 
 app = Flask(__name__, template_folder="templates")
 register_error_handlers(app, "Gender Classification Flask API")
+LOGGER = logging.getLogger("voyage.gender_api")
 
 # Keep the Flask app pointed at the shared classifier artifact and source data.
 MODEL_PATH = JOBLIB_DIR / "gender_classifier_best_model.joblib"
@@ -238,6 +240,13 @@ def predict():
     decision_strength = calculate_decision_strength(raw_score)
 
     strength_label = explain_strength(decision_strength)
+    LOGGER.info(
+        "Prediction generated.",
+        extra={
+            "event": "gender_prediction_generated",
+            "service_name": "Gender Classification Flask API",
+        },
+    )
 
     return jsonify(
         {
@@ -252,4 +261,8 @@ def predict():
 
 if __name__ == "__main__":
     # Default local entry point for the gender Flask app.
+    LOGGER.info(
+        "Starting Flask API server.",
+        extra={"event": "service_start", "service_name": "Gender Classification Flask API"},
+    )
     app.run(host="0.0.0.0", port=5003, debug=False)

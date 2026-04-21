@@ -18,6 +18,8 @@ from sklearn.exceptions import InconsistentVersionWarning
 
 from werkzeug.exceptions import HTTPException
 
+from monitoring import configure_flask_monitoring
+
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 
@@ -132,20 +134,48 @@ def build_error_response(service_name, message, status_code):
 
 
 def register_error_handlers(app, service_name):
+    configure_flask_monitoring(app, service_name)
+
     # Centralize the common Flask error shapes so all three apps behave the same way.
     @app.errorhandler(AssetLoadError)
     def handle_asset_error(error):
-        app.logger.warning("Runtime asset error: %s", error)
+        app.logger.warning(
+            "Runtime asset error.",
+            extra={
+                "event": "runtime_asset_error",
+                "service_name": service_name,
+                "path": request.path,
+                "detail": str(error),
+            },
+        )
         return build_error_response(service_name, str(error), 503)
 
     @app.errorhandler(HTTPException)
     def handle_http_error(error):
         message = error.description or "The request could not be completed."
+        app.logger.warning(
+            "HTTP request failed.",
+            extra={
+                "event": "http_error",
+                "service_name": service_name,
+                "path": request.path,
+                "status_code": error.code or 500,
+                "detail": message,
+            },
+        )
         return build_error_response(service_name, message, error.code or 500)
 
     @app.errorhandler(Exception)
     def handle_unexpected_error(error):
-        app.logger.exception("Unexpected application error", exc_info=error)
+        app.logger.exception(
+            "Unexpected application error.",
+            extra={
+                "event": "unexpected_error",
+                "service_name": service_name,
+                "path": request.path,
+            },
+            exc_info=error,
+        )
         return build_error_response(
             service_name,
             "The service ran into an unexpected error while processing the request.",
@@ -160,7 +190,14 @@ def build_health_response(service_name, asset_loader):
     try:
         asset_loader()
     except AssetLoadError as error:
-        LOGGER.warning("Health check failed for %s: %s", service_name, error)
+        LOGGER.warning(
+            "Health check failed.",
+            extra={
+                "event": "health_check_failed",
+                "service_name": service_name,
+                "detail": str(error),
+            },
+        )
         return (
             jsonify(
                 {
@@ -172,6 +209,11 @@ def build_health_response(service_name, asset_loader):
             ),
             503,
         )
+
+    LOGGER.info(
+        "Health check passed.",
+        extra={"event": "health_check_ok", "service_name": service_name},
+    )
 
     return jsonify(
         {

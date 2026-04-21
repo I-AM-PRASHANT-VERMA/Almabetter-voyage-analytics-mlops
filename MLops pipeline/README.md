@@ -245,5 +245,8 @@ kubectl -n voyage-mlops port-forward svc/mlflow-ui 5000:5000
 
 - Local training writes model files into `joblib files/` and MLflow history into `mlruns/`.
 - The Azure deployment reads those runtime files from mounted Azure storage, not from tracked folders in the public repo.
+- Runtime logs are written as structured JSON to standard output.
+- Azure collects those container logs centrally in Log Analytics, and app telemetry can also flow into Application Insights when the connection string is present in the runtime.
+- Alert rules are meant to watch the centralized Azure logs instead of local files inside the repo.
 - The hotel and gender apps are available locally, but the Docker, Jenkins, Airflow, and Kubernetes workflow in this repo is centered on the flight model.
 - A few local-only folders and personal notes are intentionally ignored in `.gitignore`.

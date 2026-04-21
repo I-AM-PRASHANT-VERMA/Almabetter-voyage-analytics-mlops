@@ -2,9 +2,12 @@ import argparse
 
 import json
 
+import logging
+
 import math
 
 import os
+import sys
 
 import tempfile
 
@@ -32,6 +35,12 @@ from xgboost import XGBRegressor
 # Keep the artifact paths and feature order in one place so the
 # training script and the serving apps stay in sync.
 BASE_DIR = Path(__file__).resolve().parents[1]
+
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+
+from monitoring import configure_service_monitoring
 
 DATA_PATH = BASE_DIR / "dataset" / "travel_capstone" / "flights.csv"
 
@@ -91,6 +100,10 @@ REQUIRED_DATA_COLUMNS = [
     "flightType",
     "agency",
 ]
+
+
+configure_service_monitoring("flight-training")
+LOGGER = logging.getLogger("voyage.flight_training")
 
 
 # Build a local file-based tracking URI from the repo path.
@@ -155,9 +168,14 @@ def ensure_local_experiment_artifact_path(experiment_name, tracking_dir):
             key="artifact_location",
             value=expected_artifact_uri,
         )
-        print("Updated the local MLflow experiment artifact path for this environment.")
-        print(f"Previous artifact location: {experiment.artifact_location}")
-        print(f"Current artifact location: {expected_artifact_uri}")
+        LOGGER.info(
+            "Updated the MLflow artifact path for this environment.",
+            extra={
+                "event": "mlflow_artifact_path_updated",
+                "previous_artifact_location": experiment.artifact_location,
+                "current_artifact_location": expected_artifact_uri,
+            },
+        )
 
     return expected_artifact_uri
 
@@ -269,6 +287,15 @@ def log_json_artifact(data, staging_dir, file_name, artifact_path):
 def run_training(args):
     if not 0 < args.test_size < 1:
         raise ValueError("--test-size must be greater than 0 and less than 1.")
+
+    LOGGER.info(
+        "Training started.",
+        extra={
+            "event": "training_started",
+            "experiment_name": args.experiment_name,
+            "tracking_dir": str(args.tracking_dir),
+        },
+    )
 
     # Local temp folders are kept inside the repo because MLflow artifact
     # logging is more predictable on Windows when it stays off the system temp.
@@ -386,8 +413,13 @@ def run_training(args):
             sklearn_model_logged = False
             mlflow.set_tag("sklearn_model_artifact_logged", "false")
             mlflow.set_tag("sklearn_model_artifact_note", "Skipped because of local file permission limits.")
-            print("Skipped MLflow sklearn model artifact logging.")
-            print(f"Reason: {error}")
+            LOGGER.warning(
+                "Skipped MLflow sklearn model artifact logging.",
+                extra={
+                    "event": "mlflow_model_artifact_skipped",
+                    "reason": str(error),
+                },
+            )
 
         else:
             mlflow.set_tag("sklearn_model_artifact_logged", "true")
@@ -415,16 +447,21 @@ def run_training(args):
 
         mlflow.log_artifact(str(args.metadata_output), artifact_path="metadata")
 
-        print("Training completed successfully.")
-        print(f"Experiment name: {args.experiment_name}")
-        print(f"Run name: {run_name}")
-        print(f"Run ID: {run.info.run_id}")
-        print(f"Tracking URI: {tracking_uri}")
-        print(f"Saved model: {args.model_output}")
-        print(f"Saved metadata: {args.metadata_output}")
-        print(f"Test RMSE: {metrics['rmse']}")
-        print(f"Test MAE: {metrics['mae']}")
-        print(f"Test R2: {metrics['r2']}")
+        LOGGER.info(
+            "Training completed successfully.",
+            extra={
+                "event": "training_completed",
+                "experiment_name": args.experiment_name,
+                "run_name": run_name,
+                "run_id": run.info.run_id,
+                "tracking_uri": tracking_uri,
+                "saved_model": str(args.model_output),
+                "saved_metadata": str(args.metadata_output),
+                "rmse": metrics["rmse"],
+                "mae": metrics["mae"],
+                "r2": metrics["r2"],
+            },
+        )
 
 
 # Keep the CLI surface small so the same script is easy to call locally,
@@ -490,5 +527,9 @@ if __name__ == "__main__":
     try:
         run_training(parsed_args)
     except Exception as error:
-        print(f"Training failed: {error}")
+        LOGGER.exception(
+            "Training failed.",
+            extra={"event": "training_failed"},
+            exc_info=error,
+        )
         raise

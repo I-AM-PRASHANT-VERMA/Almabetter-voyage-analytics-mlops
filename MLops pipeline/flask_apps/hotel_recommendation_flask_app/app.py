@@ -1,4 +1,5 @@
 import sys
+import logging
 
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from flask_apps.common import (
 
 app = Flask(__name__, template_folder="templates")
 register_error_handlers(app, "Hotel Recommendation Flask API")
+LOGGER = logging.getLogger("voyage.hotel_api")
 
 # Keep the hotel app aligned with the shared recommender bundle and hotel dataset.
 MODEL_PATH = JOBLIB_DIR / "hotel_recommender_simple.joblib"
@@ -432,4 +434,8 @@ def user_recommendations():
 
 if __name__ == "__main__":
     # Default local entry point for the hotel Flask app.
+    LOGGER.info(
+        "Starting Flask API server.",
+        extra={"event": "service_start", "service_name": "Hotel Recommendation Flask API"},
+    )
     app.run(host="0.0.0.0", port=5001, debug=False)

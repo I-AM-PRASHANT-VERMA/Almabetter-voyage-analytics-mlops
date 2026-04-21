@@ -1,6 +1,7 @@
 import sys
 
 import json
+import logging
 
 from pathlib import Path
 
@@ -66,6 +67,8 @@ MODEL_FEATURE_COLUMNS = [
     "agency_FlyingDrops",
     "agency_Rainbow",
 ]
+
+LOGGER = logging.getLogger("voyage.flight_api")
 
 
 def build_prediction_input(
@@ -303,6 +306,16 @@ def home():
             travel_date_text = str(travel_date)
 
         except Exception:
+            LOGGER.warning(
+                "Browser prediction failed.",
+                extra={
+                    "event": "browser_prediction_failed",
+                    "service_name": "Flight Price Flask API",
+                    "departure_city": departure_city,
+                    "arrival_city": arrival_city,
+                    "flight_type": flight_type,
+                },
+            )
             page_error = (
                 "The app could not create a prediction from the submitted values. "
                 "Please check the date and travel time fields."
@@ -507,6 +520,17 @@ def predict():
     )
 
     predicted_price = float(assets["model"].predict(prediction_input_df)[0])
+    LOGGER.info(
+        "Prediction generated.",
+        extra={
+            "event": "flight_prediction_generated",
+            "service_name": "Flight Price Flask API",
+            "departure_city": departure_city,
+            "arrival_city": arrival_city,
+            "flight_type": flight_type,
+            "agency": agency,
+        },
+    )
 
     # Include the matching historical route summary so the predicted price has some context.
     selected_route_df = assets["route_summary_df"][
@@ -535,4 +559,8 @@ def predict():
 
 if __name__ == "__main__":
     # Default local entry point for running the API outside Docker or Kubernetes.
+    LOGGER.info(
+        "Starting Flask API server.",
+        extra={"event": "service_start", "service_name": "Flight Price Flask API"},
+    )
     app.run(host="0.0.0.0", port=5002, debug=False)

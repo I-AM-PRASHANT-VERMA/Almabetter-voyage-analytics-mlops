@@ -8,3 +8,4 @@ flask
 pyngrok
 mlflow
 requests
+azure-monitor-opentelemetry

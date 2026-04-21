@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 .venv-airflow/
 .mlflow_temp/
+MLops pipeline/runtime_logs/
 
 # Local notebooks and editor noise
 .ipynb_checkpoints/
