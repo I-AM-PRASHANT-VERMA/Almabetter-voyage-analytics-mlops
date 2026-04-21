@@ -1,0 +1,76 @@
+# Deployment for the Streamlit frontend on AKS.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flight-streamlit
+  labels:
+    app.kubernetes.io/name: flight-streamlit
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flight-streamlit
+  template:
+    metadata:
+      labels:
+        app: flight-streamlit
+        app.kubernetes.io/name: flight-streamlit
+        app.kubernetes.io/part-of: voyage-flight-mlops
+    spec:
+      containers:
+        - name: flight-streamlit
+          image: acrvoyagemlopspr01.azurecr.io/voyage/flight-streamlit:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8501
+              name: http
+          env:
+            - name: FLIGHT_PRICE_API_URL
+              value: http://flight-api:5002
+          volumeMounts:
+            - name: model-storage
+              mountPath: /app/joblib files
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: 8501
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: 8501
+            initialDelaySeconds: 40
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi
+      volumes:
+        - name: model-storage
+          azureFile:
+            secretName: azure-files-secret
+            shareName: flight-model-share
+            readOnly: true
+---
+# LoadBalancer service so the Streamlit UI is reachable from the internet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: flight-streamlit
+  labels:
+    app.kubernetes.io/name: flight-streamlit
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  type: LoadBalancer
+  selector:
+    app: flight-streamlit
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8501

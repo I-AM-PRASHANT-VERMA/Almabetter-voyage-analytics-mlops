@@ -1,0 +1,102 @@
+name: Deploy Azure Runtime
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'MLops pipeline/**'
+      - '.azure/**'
+      - '.github/workflows/deploy-azure.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_RG: rg-voyage-mlops-dev
+  ACR_NAME: acrvoyagemlopspr01
+  ACR_LOGIN_SERVER: acrvoyagemlopspr01.azurecr.io
+  CONTAINER_APPS_ENV: cae-voyage-mlops-dev
+  AKS_NAME: aks-voyage-mlops-dev
+  WORKDIR: MLops pipeline
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build image tags
+        id: tags
+        run: |
+          echo "TAG=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ACR
+        run: |
+          az acr login --name "$ACR_NAME"
+
+      - name: Build and push runtime images
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          docker build -t "$ACR_LOGIN_SERVER/voyage/flight-api:${{ steps.tags.outputs.TAG }}" -f Dockerfile .
+          docker build -t "$ACR_LOGIN_SERVER/voyage/flight-streamlit:${{ steps.tags.outputs.TAG }}" -f Dockerfile.streamlit .
+          docker build -t "$ACR_LOGIN_SERVER/voyage/flight-mlops:${{ steps.tags.outputs.TAG }}" -f Dockerfile.mlops .
+          docker build -t "$ACR_LOGIN_SERVER/voyage/flight-mlflow-ui:${{ steps.tags.outputs.TAG }}" -f Dockerfile.mlflow-ui .
+
+          docker tag "$ACR_LOGIN_SERVER/voyage/flight-api:${{ steps.tags.outputs.TAG }}" "$ACR_LOGIN_SERVER/voyage/flight-api:latest"
+          docker tag "$ACR_LOGIN_SERVER/voyage/flight-streamlit:${{ steps.tags.outputs.TAG }}" "$ACR_LOGIN_SERVER/voyage/flight-streamlit:latest"
+          docker tag "$ACR_LOGIN_SERVER/voyage/flight-mlops:${{ steps.tags.outputs.TAG }}" "$ACR_LOGIN_SERVER/voyage/flight-mlops:latest"
+          docker tag "$ACR_LOGIN_SERVER/voyage/flight-mlflow-ui:${{ steps.tags.outputs.TAG }}" "$ACR_LOGIN_SERVER/voyage/flight-mlflow-ui:latest"
+
+          docker push "$ACR_LOGIN_SERVER/voyage/flight-api:${{ steps.tags.outputs.TAG }}"
+          docker push "$ACR_LOGIN_SERVER/voyage/flight-streamlit:${{ steps.tags.outputs.TAG }}"
+          docker push "$ACR_LOGIN_SERVER/voyage/flight-mlops:${{ steps.tags.outputs.TAG }}"
+          docker push "$ACR_LOGIN_SERVER/voyage/flight-mlflow-ui:${{ steps.tags.outputs.TAG }}"
+
+          docker push "$ACR_LOGIN_SERVER/voyage/flight-api:latest"
+          docker push "$ACR_LOGIN_SERVER/voyage/flight-streamlit:latest"
+          docker push "$ACR_LOGIN_SERVER/voyage/flight-mlops:latest"
+          docker push "$ACR_LOGIN_SERVER/voyage/flight-mlflow-ui:latest"
+
+      - name: Update Container Apps images
+        run: |
+          az containerapp update \
+            --name aca-flight-api \
+            --resource-group "$AZURE_RG" \
+            --image "$ACR_LOGIN_SERVER/voyage/flight-api:${{ steps.tags.outputs.TAG }}"
+
+          az containerapp update \
+            --name aca-flight-streamlit \
+            --resource-group "$AZURE_RG" \
+            --image "$ACR_LOGIN_SERVER/voyage/flight-streamlit:${{ steps.tags.outputs.TAG }}"
+
+          az containerapp update \
+            --name aca-mlflow-ui \
+            --resource-group "$AZURE_RG" \
+            --image "$ACR_LOGIN_SERVER/voyage/flight-mlflow-ui:${{ steps.tags.outputs.TAG }}"
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ env.AZURE_RG }}
+          cluster-name: ${{ env.AKS_NAME }}
+
+      - name: Roll out AKS images
+        run: |
+          kubectl set image deployment/flight-api flight-api="$ACR_LOGIN_SERVER/voyage/flight-api:${{ steps.tags.outputs.TAG }}" -n voyage-mlops
+          kubectl set image deployment/flight-streamlit flight-streamlit="$ACR_LOGIN_SERVER/voyage/flight-streamlit:${{ steps.tags.outputs.TAG }}" -n voyage-mlops
+          kubectl set image deployment/mlflow-ui mlflow-ui="$ACR_LOGIN_SERVER/voyage/flight-mlflow-ui:${{ steps.tags.outputs.TAG }}" -n voyage-mlops
+          kubectl rollout status deployment/flight-api -n voyage-mlops --timeout=10m
+          kubectl rollout status deployment/flight-streamlit -n voyage-mlops --timeout=10m
+          kubectl rollout status deployment/mlflow-ui -n voyage-mlops --timeout=10m

@@ -1,0 +1,2 @@
+# Keep Airflow separate so the main app setup stays as it is.
+apache-airflow==3.2.0

@@ -1,0 +1,75 @@
+# Deployment for the Flask API on AKS.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flight-api
+  labels:
+    app.kubernetes.io/name: flight-api
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flight-api
+  template:
+    metadata:
+      labels:
+        app: flight-api
+        app.kubernetes.io/name: flight-api
+        app.kubernetes.io/part-of: voyage-flight-mlops
+    spec:
+      containers:
+        - name: flight-api
+          image: acrvoyagemlopspr01.azurecr.io/voyage/flight-api:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5002
+              name: http
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          volumeMounts:
+            - name: model-storage
+              mountPath: /app/joblib files
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5002
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5002
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: model-storage
+          azureFile:
+            secretName: azure-files-secret
+            shareName: flight-model-share
+            readOnly: true
+---
+# ClusterIP service for the in-cluster API.
+apiVersion: v1
+kind: Service
+metadata:
+  name: flight-api
+  labels:
+    app.kubernetes.io/name: flight-api
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  selector:
+    app: flight-api
+  ports:
+    - name: http
+      port: 5002
+      targetPort: 5002

@@ -1,0 +1,46 @@
+# Python cache and local tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Local virtual environments
+.venv/
+.venv-airflow/
+.jenkins-venv/
+venv/
+env/
+
+# Local MLflow runtime state
+mlruns/
+.mlflow_temp/
+
+# Local Airflow runtime state
+airflow/logs/
+airflow/airflow.cfg
+airflow/airflow.db
+airflow/airflow.db-shm
+airflow/airflow.db-wal
+airflow/standalone_admin_password.txt
+airflow/simple_auth_manager_passwords.json.generated
+airflow/*.pid
+
+# Generated model outputs
+joblib files/*.joblib
+joblib files/*_metadata.json
+
+# Local secrets and OS files
+.env
+.streamlit/secrets.toml
+.DS_Store
+Thumbs.db
+
+# Local Jenkins validation outputs
+jenkins_artifacts/
+
+# Personal notes and leftover local folders
+help.txt
+help me.rd
+read me ngrok.rd/
+templete/

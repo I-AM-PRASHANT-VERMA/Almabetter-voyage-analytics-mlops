@@ -1,0 +1,62 @@
+# Manual AKS job for refreshing the saved model and MLflow run history.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: flight-training
+  namespace: voyage-mlops
+  labels:
+    app.kubernetes.io/name: flight-training
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: flight-training
+        app.kubernetes.io/name: flight-training
+        app.kubernetes.io/part-of: voyage-flight-mlops
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: flight-training
+          image: acrvoyagemlopspr01.azurecr.io/voyage/flight-mlops:latest
+          imagePullPolicy: Always
+          command:
+            - python
+          args:
+            - training/train_flight_price_regression_mlflow.py
+            - --tracking-dir
+            - /app/mlruns
+            - --model-output
+            - /app/joblib files/flight_price_model.joblib
+            - --metadata-output
+            - /app/joblib files/flight_price_model_metadata.json
+            - --run-name
+            - flight_price_aks_manual_run
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          volumeMounts:
+            - name: model-storage
+              mountPath: /app/joblib files
+            - name: mlflow-runs
+              mountPath: /app/mlruns
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+      volumes:
+        - name: model-storage
+          azureFile:
+            secretName: azure-files-secret
+            shareName: flight-model-share
+            readOnly: false
+        - name: mlflow-runs
+          azureFile:
+            secretName: azure-files-secret
+            shareName: mlflow-runs-share
+            readOnly: false

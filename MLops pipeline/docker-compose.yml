@@ -1,0 +1,94 @@
+# Compose file for the flight workflow only.
+services:
+  # One-off training container that refreshes the saved joblib model and MLflow runs.
+  flight-training:
+    # Keep training and MLflow services behind the optional mlops profile.
+    profiles: ["mlops"]
+    build:
+      context: .
+      dockerfile: Dockerfile.mlops
+    container_name: voyage-flight-training
+    # Run the same training script used locally and from Airflow.
+    command: ["python", "training/train_flight_price_regression_mlflow.py"]
+    environment:
+      # Unbuffered logs make it easier to follow the run in Docker output.
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # The dataset is read-only because training should not mutate the source CSV.
+      - ./dataset:/app/dataset:ro
+      # Mount the training code so script edits do not require a rebuild while iterating locally.
+      - ./training:/app/training:ro
+      # Persist refreshed model artifacts back into the repo folder.
+      - "./joblib files:/app/joblib files"
+      # Persist MLflow runs back into the repo folder.
+      - ./mlruns:/app/mlruns
+
+  # Optional MLflow UI that points at the same local run history written by training.
+  mlflow-ui:
+    profiles: ["mlops"]
+    build:
+      context: .
+      dockerfile: Dockerfile.mlops
+    container_name: voyage-mlflow-ui
+    # Reuse the mlops image, but swap the command so the container serves the UI instead of training.
+    command: ["mlflow", "ui", "--backend-store-uri", "/app/mlruns", "--host", "0.0.0.0", "--port", "5000"]
+    ports:
+      - "5000:5000"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # The UI only needs the MLflow tracking directory.
+      - ./mlruns:/app/mlruns
+
+  # Flask API that serves the saved flight model.
+  flight-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: voyage-flight-api
+    ports:
+      - "5002:5002"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      # The container is considered ready once the Flask health route responds.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5002/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    volumes:
+      # The API reads the source dataset for metadata and route summaries.
+      - ./dataset:/app/dataset:ro
+      # The saved model is mounted read-only because serving should not rewrite it.
+      - "./joblib files:/app/joblib files:ro"
+
+  # Streamlit frontend that can either call the API or fall back to the local model.
+  flight-streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: voyage-flight-streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      # Inside Compose, the frontend should always talk to the Flask service name.
+      FLIGHT_PRICE_API_URL: ${FLIGHT_PRICE_API_URL:-http://flight-api:5002}
+    depends_on:
+      # Wait for the API to pass its health check before bringing the UI fully online.
+      flight-api:
+        condition: service_healthy
+    healthcheck:
+      # Streamlit exposes its own lightweight health endpoint.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    volumes:
+      # The frontend uses the dataset for charts and contextual summaries.
+      - ./dataset:/app/dataset:ro
+      # The model mount is kept read-only during serving.
+      - "./joblib files:/app/joblib files:ro"
+      # Keep the local Streamlit config in sync with the container.
+      - ./.streamlit:/app/.streamlit:ro

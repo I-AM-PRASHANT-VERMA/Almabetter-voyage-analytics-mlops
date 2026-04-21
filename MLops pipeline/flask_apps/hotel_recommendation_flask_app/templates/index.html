@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ app_name }}</title>
+    <style>
+        body {
+            font-family: Calibri, Arial, sans-serif;
+            margin: 0;
+            background: #f4f7fb;
+            color: #1f2937;
+        }
+        .page-shell {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        .hero-card {
+            background: linear-gradient(135deg, #0f172a, #1d4f7a);
+            color: #ffffff;
+            border-radius: 20px;
+            padding: 28px;
+            box-shadow: 0 16px 34px rgba(15, 23, 42, 0.18);
+            margin-bottom: 20px;
+        }
+        .hero-card h1 {
+            margin: 0 0 10px 0;
+            font-size: 34px;
+        }
+        .hero-card p {
+            margin: 0;
+            line-height: 1.6;
+        }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .summary-card,
+        .panel-card {
+            background: #ffffff;
+            border-radius: 18px;
+            padding: 18px;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+        }
+        .summary-card h3,
+        .panel-card h2,
+        .panel-card h3 {
+            margin-top: 0;
+        }
+        .section-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 18px;
+            margin-bottom: 18px;
+        }
+        label {
+            display: block;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+        input,
+        select,
+        button {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid #cbd5e1;
+            margin-bottom: 12px;
+            font-size: 15px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #1d4ed8;
+            color: #ffffff;
+            border: none;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #1e40af;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+        th,
+        td {
+            border: 1px solid #dbe4f0;
+            padding: 10px;
+            text-align: left;
+            font-size: 14px;
+        }
+        th {
+            background: #eff6ff;
+        }
+        .small-note {
+            color: #475569;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-shell">
+        <!-- Hero section frames the three recommendation modes used across the page. -->
+        <div class="hero-card">
+            <h1>Hotel Recommendation System</h1>
+            <p>
+                This application presents hotel recommendations using popularity, similarity, and user-based suggestions.
+            </p>
+        </div>
+
+        <!-- High-level totals help explain what the saved recommender bundle is working with. -->
+        <div class="summary-grid">
+            <div class="summary-card">
+                <h3>Total Hotels</h3>
+                <p>{{ hotel_count }}</p>
+            </div>
+            <div class="summary-card">
+                <h3>Total Users</h3>
+                <p>{{ user_count }}</p>
+            </div>
+            <div class="summary-card">
+                <h3>Eligible Users</h3>
+                <p>{{ eligible_user_count }}</p>
+            </div>
+            <div class="summary-card">
+                <h3>Files Used</h3>
+                <p class="small-note">{{ model_file }}<br>{{ dataset_file }}</p>
+            </div>
+        </div>
+
+        <!-- Keep the popularity and similar-hotel workflows side by side for quick comparison. -->
+        <div class="section-grid">
+            <div class="panel-card">
+                <h2>Popular Hotels</h2>
+                <p class="small-note">
+                    This table shows the hotels with the strongest overall performance in the saved dataset.
+                </p>
+                <!-- Hidden fields keep the rest of the page state intact on a partial form submit. -->
+                <form method="post">
+                    <label for="popular_top_n">How many popular hotels do you want to see?</label>
+                    <input id="popular_top_n" name="popular_top_n" type="number" min="1" value="{{ popular_top_n }}">
+                    <input name="selected_hotel" type="hidden" value="{{ selected_hotel }}">
+                    <input name="similar_top_n" type="hidden" value="{{ similar_top_n }}">
+                    <input name="selected_user" type="hidden" value="{{ selected_user }}">
+                    <input name="user_top_n" type="hidden" value="{{ user_top_n }}">
+                    <button type="submit">Show Popular Hotels</button>
+                </form>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Hotel</th>
+                            <th>Place</th>
+                            <th>Average Rating</th>
+                            <th>Rating Count</th>
+                            <th>Average Price</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in popular_hotels %}
+                        <tr>
+                            <td>{{ row.name }}</td>
+                            <td>{{ row.place }}</td>
+                            <td>{{ row.avg_rating }}</td>
+                            <td>{{ row.rating_count }}</td>
+                            <td>{{ row.avg_price }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="panel-card">
+                <h2>Similar Hotels</h2>
+                <p class="small-note">
+                    Select one hotel to view other hotels with similar recommendation scores.
+                </p>
+                <!-- Repost the companion filters so one form action does not wipe the others. -->
+                <form method="post">
+                    <label for="selected_hotel">Choose a hotel</label>
+                    <select id="selected_hotel" name="selected_hotel">
+                        {% for hotel_name in hotel_options %}
+                        <option value="{{ hotel_name }}" {% if hotel_name == selected_hotel %}selected{% endif %}>{{ hotel_name }}</option>
+                        {% endfor %}
+                    </select>
+                    <label for="similar_top_n">How many similar hotels do you want?</label>
+                    <input id="similar_top_n" name="similar_top_n" type="number" min="1" value="{{ similar_top_n }}">
+                    <input name="popular_top_n" type="hidden" value="{{ popular_top_n }}">
+                    <input name="selected_user" type="hidden" value="{{ selected_user }}">
+                    <input name="user_top_n" type="hidden" value="{{ user_top_n }}">
+                    <button type="submit">Find Similar Hotels</button>
+                </form>
+                {% if selected_hotel_details %}
+                <p class="small-note">
+                    Selected hotel details:
+                    <br>Place: {{ selected_hotel_details.place }}
+                    <br>Average price: {{ selected_hotel_details.avg_price }}
+                    <br>Booking count: {{ selected_hotel_details.booking_count }}
+                </p>
+                {% endif %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Hotel</th>
+                            <th>Combined Score</th>
+                            <th>Content Score</th>
+                            <th>Collaborative Score</th>
+                            <th>Place</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in similar_hotels %}
+                        <tr>
+                            <td>{{ row.name }}</td>
+                            <td>{{ row.combined_score }}</td>
+                            <td>{{ row.content_score }}</td>
+                            <td>{{ row.collaborative_score }}</td>
+                            <td>{{ row.place }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- The user recommendation section pairs new suggestions with the user's seen history. -->
+        <div class="panel-card">
+            <h2>User Recommendations</h2>
+            <p class="small-note">
+                Select a user code to view likely hotel suggestions based on previous interactions.
+            </p>
+            <form method="post">
+                <div class="section-grid">
+                    <div>
+                        <label for="selected_user">Choose a user code</label>
+                        <select id="selected_user" name="selected_user">
+                            {% for user_code in user_options %}
+                            <option value="{{ user_code }}" {% if user_code == selected_user %}selected{% endif %}>{{ user_code }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label for="user_top_n">How many recommendations do you want?</label>
+                        <input id="user_top_n" name="user_top_n" type="number" min="1" value="{{ user_top_n }}">
+                    </div>
+                </div>
+                <input name="popular_top_n" type="hidden" value="{{ popular_top_n }}">
+                <input name="selected_hotel" type="hidden" value="{{ selected_hotel }}">
+                <input name="similar_top_n" type="hidden" value="{{ similar_top_n }}">
+                <button type="submit">Recommend Hotels</button>
+            </form>
+            <p class="small-note">
+                This user has already seen {{ seen_hotel_count }} hotel(s).
+            </p>
+            <div class="section-grid">
+                <div>
+                    <h3>Recommended Hotels</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Hotel</th>
+                                <th>Predicted Score</th>
+                                <th>Place</th>
+                                <th>Average Price</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in recommended_hotels %}
+                            <tr>
+                                <td>{{ row.name }}</td>
+                                <td>{{ row.predicted_score }}</td>
+                                <td>{{ row.place }}</td>
+                                <td>{{ row.avg_price }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div>
+                    <h3>User History</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Hotel</th>
+                                <th>Interaction Score</th>
+                                <th>Place</th>
+                                <th>Average Price</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in user_history %}
+                            <tr>
+                                <td>{{ row.name }}</td>
+                                <td>{{ row.interaction_score }}</td>
+                                <td>{{ row.place }}</td>
+                                <td>{{ row.avg_price }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

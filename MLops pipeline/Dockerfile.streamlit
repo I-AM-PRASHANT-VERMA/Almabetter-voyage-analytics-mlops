@@ -1,0 +1,33 @@
+# Base image for the flight Streamlit service.
+FROM python:3.11.15-slim-bookworm
+
+# Keep Python output cleaner inside the container.
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Streamlit and the shared files live under /app.
+WORKDIR /app
+
+# XGBoost still needs libgomp here because the app can load the saved flight model.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first so dependency installs stay cached across UI edits.
+COPY ["requirements.txt", "./"]
+
+# Install the packages needed by Streamlit and the local prediction fallback.
+RUN pip install --no-cache-dir -r requirements.txt
+
+# The mounted model directory may not exist yet on a fresh container start.
+RUN mkdir -p "/app/joblib files"
+
+# Copy the app code, the Streamlit config, and the dataset used for local summaries.
+COPY ["streamlit", "/app/streamlit"]
+COPY [".streamlit", "/app/.streamlit"]
+COPY ["dataset", "/app/dataset"]
+COPY ["joblib files", "/app/joblib files"]
+
+# The Streamlit app is exposed on port 8501.
+EXPOSE 8501
+
+# Bind to all interfaces so Docker and Compose can reach the app from outside the container.
+CMD ["streamlit", "run", "streamlit/flight_price_app.py", "--server.address=0.0.0.0", "--server.port=8501"]

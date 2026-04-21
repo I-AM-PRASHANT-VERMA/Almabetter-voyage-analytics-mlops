@@ -1,0 +1,70 @@
+# Manual training job for refreshing the flight model inside the cluster.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: flight-training
+  # Pin the job to the same namespace used by the serving stack.
+  namespace: voyage-mlops
+  labels:
+    app.kubernetes.io/name: flight-training
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  # One retry is enough here because repeated failures usually point to config issues.
+  backoffLimit: 1
+  # Clean the finished job up after a short window so demo clusters do not fill up with old jobs.
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: flight-training
+        app.kubernetes.io/name: flight-training
+        app.kubernetes.io/part-of: voyage-flight-mlops
+    spec:
+      # This is a run-once batch job, so the pod should not restart forever.
+      restartPolicy: Never
+      containers:
+        - name: flight-training
+          # Reuse the same image that already holds the training script and MLflow dependencies.
+          image: voyage-flight-mlops:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+          args:
+            # Run the same training script used locally, but point outputs at mounted cluster storage.
+            - training/train_flight_price_regression_mlflow.py
+            - --tracking-dir
+            - /app/mlruns
+            - --model-output
+            - /app/joblib files/flight_price_model.joblib
+            - --metadata-output
+            - /app/joblib files/flight_price_model_metadata.json
+            - --run-name
+            - flight_price_k8s_manual_run
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          volumeMounts:
+            # The job writes the refreshed joblib artifact here for the API to read later.
+            - name: model-storage
+              mountPath: /app/joblib files
+            # MLflow run history is persisted separately so the UI can mount it directly.
+            - name: mlflow-runs
+              mountPath: /app/mlruns
+          resources:
+            requests:
+              # Keep the resource request modest for local-cluster demos.
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              # Give training extra headroom so XGBoost has room to finish cleanly.
+              cpu: 1000m
+              memory: 1Gi
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            # Shared PVC that holds the serving artifact.
+            claimName: flight-model-pvc
+        - name: mlflow-runs
+          persistentVolumeClaim:
+            # Shared PVC that holds MLflow run folders.
+            claimName: mlflow-runs-pvc

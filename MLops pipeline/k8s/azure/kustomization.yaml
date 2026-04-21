@@ -1,0 +1,11 @@
+# Azure AKS entry point for the flight workflow manifests.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: voyage-mlops
+
+resources:
+  - namespace.yaml
+  - flight-api.yaml
+  - flight-streamlit.yaml
+  - mlflow-ui.yaml

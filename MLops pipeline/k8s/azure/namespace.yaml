@@ -1,0 +1,8 @@
+# Keep the Azure-hosted flight workflow grouped under one namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: voyage-mlops
+  labels:
+    app.kubernetes.io/name: voyage-mlops
+    app.kubernetes.io/part-of: voyage-flight-mlops

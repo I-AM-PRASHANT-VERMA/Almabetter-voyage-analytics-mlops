@@ -1,0 +1,83 @@
+# Deployment for the Flask API that serves the saved flight model.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flight-api
+  labels:
+    app.kubernetes.io/name: flight-api
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  # One replica keeps the demo simple and avoids PVC write-sharing questions.
+  replicas: 1
+  selector:
+    matchLabels:
+      # Service traffic is routed to pods with this label.
+      app: flight-api
+  template:
+    metadata:
+      labels:
+        app: flight-api
+        app.kubernetes.io/name: flight-api
+        app.kubernetes.io/part-of: voyage-flight-mlops
+    spec:
+      containers:
+        - name: flight-api
+          # This image is built from the root Dockerfile.
+          image: voyage-flight-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5002
+              name: http
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          volumeMounts:
+            # The API only reads the saved model and metadata.
+            - name: model-storage
+              mountPath: /app/joblib files
+              readOnly: true
+          readinessProbe:
+            # Wait for the health route before sending traffic to the pod.
+            httpGet:
+              path: /health
+              port: 5002
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            # Use the same lightweight route to catch a stuck container later on.
+            httpGet:
+              path: /health
+              port: 5002
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              # Light request is enough for a single-model demo API.
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              # Give the process some room to load the model and serve requests comfortably.
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            # Shared model PVC populated by the training job.
+            claimName: flight-model-pvc
+---
+# ClusterIP service for the Flask API.
+apiVersion: v1
+kind: Service
+metadata:
+  name: flight-api
+  labels:
+    app.kubernetes.io/name: flight-api
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  selector:
+    app: flight-api
+  ports:
+    # Expose the same HTTP port the container listens on.
+    - name: http
+      port: 5002
+      targetPort: 5002

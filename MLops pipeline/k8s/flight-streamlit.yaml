@@ -1,0 +1,72 @@
+# Deployment for the Streamlit frontend that calls the Flask API service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flight-streamlit
+  labels:
+    app.kubernetes.io/name: flight-streamlit
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      # Service traffic is routed to pods with this label.
+      app: flight-streamlit
+  template:
+    metadata:
+      labels:
+        app: flight-streamlit
+        app.kubernetes.io/name: flight-streamlit
+        app.kubernetes.io/part-of: voyage-flight-mlops
+    spec:
+      containers:
+        - name: flight-streamlit
+          # This image is built from Dockerfile.streamlit.
+          image: voyage-flight-streamlit:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8501
+              name: http
+          env:
+            # Point the frontend at the in-cluster Flask service.
+            - name: FLIGHT_PRICE_API_URL
+              value: http://flight-api:5002
+          readinessProbe:
+            # Streamlit exposes its own internal health endpoint.
+            httpGet:
+              path: /_stcore/health
+              port: 8501
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: 8501
+            initialDelaySeconds: 40
+            periodSeconds: 20
+          resources:
+            requests:
+              # Keep the baseline request small for local demos.
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              # Leave enough room for the UI, charts, and local data processing.
+              cpu: 500m
+              memory: 512Mi
+---
+# ClusterIP service for the Streamlit frontend.
+apiVersion: v1
+kind: Service
+metadata:
+  name: flight-streamlit
+  labels:
+    app.kubernetes.io/name: flight-streamlit
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  selector:
+    app: flight-streamlit
+  ports:
+    # Expose the same HTTP port the Streamlit process listens on.
+    - name: http
+      port: 8501
+      targetPort: 8501

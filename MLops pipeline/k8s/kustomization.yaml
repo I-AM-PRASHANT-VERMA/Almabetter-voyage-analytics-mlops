@@ -1,0 +1,15 @@
+# Kustomize entry point for the flight workflow manifests.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Apply the same namespace to every resource in this bundle.
+namespace: voyage-mlops
+
+# Keep the deployment order readable in one place.
+resources:
+  - namespace.yaml
+  - persistent-storage.yaml
+  - flight-training-job.yaml
+  - flight-api.yaml
+  - flight-streamlit.yaml
+  - mlflow-ui.yaml

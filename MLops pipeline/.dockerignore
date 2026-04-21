@@ -1,0 +1,14 @@
+.git
+.gitignore
+.venv
+.venv-airflow
+.mlflow_temp
+airflow
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.out
+*.err
+jenkins_artifacts

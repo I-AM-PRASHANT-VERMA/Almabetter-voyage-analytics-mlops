@@ -1,0 +1,32 @@
+# PVC for the saved flight model and metadata file.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flight-model-pvc
+  labels:
+    app.kubernetes.io/name: flight-model-storage
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  # One node writing at a time is enough for this local demo setup.
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # Small storage request because the joblib artifacts are lightweight.
+      storage: 1Gi
+---
+# Separate PVC for MLflow tracking data so run history stays isolated from model files.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mlflow-runs-pvc
+  labels:
+    app.kubernetes.io/name: mlflow-runs-storage
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # MLflow run folders grow faster than the saved model, so give them a bit more room.
+      storage: 2Gi

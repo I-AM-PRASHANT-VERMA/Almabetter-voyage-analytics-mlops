@@ -1,0 +1,36 @@
+# Dedicated image for the MLflow UI so cloud deployments do not need command overrides.
+FROM python:3.11.15-slim-bookworm
+
+# Keep Python output predictable in container logs.
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# MLflow runs from the project root path inside the container.
+WORKDIR /app
+
+# XGBoost support stays installed because the copied run artifacts can reference model flavors from training.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first so the dependency layer stays reusable.
+COPY ["requirements.txt", "./"]
+
+# Install the dependencies needed by MLflow and the stored artifacts.
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Keep the expected tracking directory in place before copying the run history.
+RUN mkdir -p /app/mlruns
+
+# Copy the startup helper so runtime config can be driven through environment variables.
+COPY ["scripts/start_mlflow_ui.sh", "/app/scripts/start_mlflow_ui.sh"]
+
+# Copy the existing tracked runs into the image for a simple read-only UI deployment.
+COPY ["mlruns", "/app/mlruns"]
+
+# Make sure the startup helper is executable inside the container.
+RUN chmod +x /app/scripts/start_mlflow_ui.sh
+
+# Serve the UI on the standard MLflow port.
+EXPOSE 5000
+
+# Start the MLflow UI through the helper so host and CORS settings can come from Azure config.
+CMD ["/app/scripts/start_mlflow_ui.sh"]

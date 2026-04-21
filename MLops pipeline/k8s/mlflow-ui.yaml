@@ -1,0 +1,88 @@
+# Deployment for the local-cluster MLflow UI.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow-ui
+  labels:
+    app.kubernetes.io/name: mlflow-ui
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      # Service traffic is routed to pods with this label.
+      app: mlflow-ui
+  template:
+    metadata:
+      labels:
+        app: mlflow-ui
+        app.kubernetes.io/name: mlflow-ui
+        app.kubernetes.io/part-of: voyage-flight-mlops
+    spec:
+      containers:
+        - name: mlflow-ui
+          # Reuse the mlops image and swap the command to start the UI.
+          image: voyage-flight-mlops:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - mlflow
+          args:
+            # Point MLflow at the mounted run-history volume.
+            - ui
+            - --backend-store-uri
+            - /app/mlruns
+            - --host
+            - 0.0.0.0
+            - --port
+            - "5000"
+          ports:
+            - containerPort: 5000
+              name: http
+          volumeMounts:
+            # The UI only needs access to the MLflow tracking directory.
+            - name: mlflow-runs
+              mountPath: /app/mlruns
+          readinessProbe:
+            # A simple HTTP response is enough to mark the UI ready.
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              # MLflow UI is not heavy, but it benefits from a bit more memory for browsing artifacts.
+              cpu: 100m
+              memory: 1Gi
+            limits:
+              # Keep a reasonable ceiling for local clusters.
+              cpu: 500m
+              memory: 2Gi
+      volumes:
+        - name: mlflow-runs
+          persistentVolumeClaim:
+            # Shared MLflow PVC written by the training job.
+            claimName: mlflow-runs-pvc
+---
+# ClusterIP service for the MLflow UI.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow-ui
+  labels:
+    app.kubernetes.io/name: mlflow-ui
+    app.kubernetes.io/part-of: voyage-flight-mlops
+spec:
+  selector:
+    app: mlflow-ui
+  ports:
+    # Expose the same HTTP port the UI listens on.
+    - name: http
+      port: 5000
+      targetPort: 5000

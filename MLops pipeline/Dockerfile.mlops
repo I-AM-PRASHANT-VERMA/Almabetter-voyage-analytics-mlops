@@ -1,0 +1,30 @@
+# Shared image for flight training and the local MLflow UI.
+FROM python:3.11.15-slim-bookworm
+
+# Keep Python output cleaner inside the container.
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Training and MLflow both run from /app.
+WORKDIR /app
+
+# XGBoost needs libgomp when the regression model is trained inside the container.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first so the dependency layer is reused on later rebuilds.
+COPY ["requirements.txt", "./"]
+
+# Install the packages used by training and MLflow.
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Pre-create the folders that are usually mounted back to the host.
+RUN mkdir -p /app/dataset "/app/joblib files" /app/mlruns
+
+# Only the training code and source dataset are needed in this image.
+COPY ["training", "/app/training"]
+COPY ["dataset", "/app/dataset"]
+COPY ["joblib files", "/app/joblib files"]
+COPY ["mlruns", "/app/mlruns"]
+
+# Default to training so Compose can reuse the same image for both commands.
+CMD ["python", "training/train_flight_price_regression_mlflow.py"]

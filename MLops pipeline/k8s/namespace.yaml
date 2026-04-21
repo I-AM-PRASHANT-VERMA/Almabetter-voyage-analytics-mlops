@@ -1,0 +1,10 @@
+# Keep the flight workflow resources grouped under a dedicated namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  # Every manifest in this folder is scoped to the same namespace name.
+  name: voyage-mlops
+  labels:
+    # Standard labels make the stack easier to identify in cluster views.
+    app.kubernetes.io/name: voyage-mlops
+    app.kubernetes.io/part-of: voyage-flight-mlops
