@@ -17,14 +17,11 @@ COPY ["requirements.txt", "./"]
 # Install the dependencies needed by MLflow and the stored artifacts.
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Keep the expected tracking directory in place before copying the run history.
+# Keep the tracking path ready so the mounted MLflow share can plug in cleanly.
 RUN mkdir -p /app/mlruns
 
 # Copy the startup helper so runtime config can be driven through environment variables.
 COPY ["scripts/start_mlflow_ui.sh", "/app/scripts/start_mlflow_ui.sh"]
-
-# Copy the existing tracked runs into the image for a simple read-only UI deployment.
-COPY ["mlruns", "/app/mlruns"]
 
 # Make sure the startup helper is executable inside the container.
 RUN chmod +x /app/scripts/start_mlflow_ui.sh

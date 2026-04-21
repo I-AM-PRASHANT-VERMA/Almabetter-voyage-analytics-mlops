@@ -17,14 +17,12 @@ COPY ["requirements.txt", "./"]
 # Install the packages used by training and MLflow.
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-create the folders that are usually mounted back to the host.
+# Keep the training output paths ready so mounted storage can take over at runtime.
 RUN mkdir -p /app/dataset "/app/joblib files" /app/mlruns
 
 # Only the training code and source dataset are needed in this image.
 COPY ["training", "/app/training"]
 COPY ["dataset", "/app/dataset"]
-COPY ["joblib files", "/app/joblib files"]
-COPY ["mlruns", "/app/mlruns"]
 
 # Default to training so Compose can reuse the same image for both commands.
 CMD ["python", "training/train_flight_price_regression_mlflow.py"]

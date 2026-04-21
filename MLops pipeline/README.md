@@ -17,7 +17,7 @@ The main MLOps pipeline in this repo is built around the flight price model. It 
 - `flask_apps/`: Flask apps and browser pages for the same models
 - `ngrok_apps/`: small launchers that expose each Flask app through ngrok
 - `k8s/`: Kubernetes manifests for the flight workflow
-- `joblib files/`: saved model artifacts already included in the repo
+- `joblib files/`: local model output folder used for local runs and mounted runtime storage
 - `dataset/travel_capstone/`: source CSV files used by the apps and training flow
 
 ## Quick Setup
@@ -100,7 +100,7 @@ Optional custom run name:
 python training/train_flight_price_regression_mlflow.py --run-name flight_price_main_model
 ```
 
-This updates:
+This updates your local runtime folders:
 
 - `joblib files/flight_price_model.joblib`
 - `joblib files/flight_price_model_metadata.json`
@@ -147,6 +147,8 @@ docker build -f Dockerfile.mlops -t voyage-flight-mlops .
 ```powershell
 docker compose --profile mlops run --rm flight-training
 ```
+
+The compose setup mounts `joblib files/` and `mlruns/` from the local machine. The cloud deployment uses Azure-mounted storage instead of baking those folders into the image.
 
 ### Run MLflow UI in Docker
 
@@ -241,6 +243,7 @@ kubectl -n voyage-mlops port-forward svc/mlflow-ui 5000:5000
 
 ## Notes
 
-- The saved joblib artifacts are already present under `joblib files/`.
+- Local training writes model files into `joblib files/` and MLflow history into `mlruns/`.
+- The Azure deployment reads those runtime files from mounted Azure storage, not from tracked folders in the public repo.
 - The hotel and gender apps are available locally, but the Docker, Jenkins, Airflow, and Kubernetes workflow in this repo is centered on the flight model.
 - A few local-only folders and personal notes are intentionally ignored in `.gitignore`.

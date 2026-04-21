@@ -17,14 +17,13 @@ COPY ["requirements.txt", "./"]
 # Install the packages needed by Streamlit and the local prediction fallback.
 RUN pip install --no-cache-dir -r requirements.txt
 
-# The mounted model directory may not exist yet on a fresh container start.
+# Keep the model path ready so Azure File mounts work the same in every environment.
 RUN mkdir -p "/app/joblib files"
 
 # Copy the app code, the Streamlit config, and the dataset used for local summaries.
 COPY ["streamlit", "/app/streamlit"]
 COPY [".streamlit", "/app/.streamlit"]
 COPY ["dataset", "/app/dataset"]
-COPY ["joblib files", "/app/joblib files"]
 
 # The Streamlit app is exposed on port 8501.
 EXPOSE 8501
