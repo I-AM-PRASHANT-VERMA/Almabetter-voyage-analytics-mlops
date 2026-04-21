@@ -179,18 +179,23 @@ def configure_flask_monitoring(app, service_name):
         if started_at is not None:
             duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
 
-        app.logger.info(
-            "Request completed.",
-            extra={
-                "event": "request_completed",
-                "service_name": service_name,
-                "request_id": getattr(g, "request_id", ""),
-                "method": request.method,
-                "path": request.path,
-                "status_code": response.status_code,
-                "duration_ms": duration_ms,
-            },
-        )
+        log_payload = {
+            "event": "request_completed",
+            "service_name": service_name,
+            "request_id": getattr(g, "request_id", ""),
+            "method": request.method,
+            "path": request.path,
+            "status_code": response.status_code,
+            "duration_ms": duration_ms,
+        }
+
+        if response.status_code >= 500:
+            app.logger.error("Request completed with a server error.", extra=log_payload)
+        elif response.status_code >= 400:
+            app.logger.warning("Request completed with a client error.", extra=log_payload)
+        else:
+            app.logger.info("Request completed.", extra=log_payload)
+
         response.headers["X-Request-ID"] = getattr(g, "request_id", "")
 
         return response
