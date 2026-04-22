@@ -22,6 +22,7 @@ RUN mkdir -p /app/dataset "/app/joblib files" /app/mlruns
 
 # Only the training code and source dataset are needed in this image.
 COPY ["training", "/app/training"]
+COPY ["monitoring.py", "/app/monitoring.py"]
 COPY ["dataset", "/app/dataset"]
 
 # Default to training so Compose can reuse the same image for both commands.

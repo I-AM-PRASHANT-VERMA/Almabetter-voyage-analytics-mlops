@@ -22,6 +22,7 @@ RUN mkdir -p "/app/joblib files"
 
 # Only copy the pieces this service actually needs at runtime.
 COPY ["flask_apps", "/app/flask_apps"]
+COPY ["monitoring.py", "/app/monitoring.py"]
 COPY ["dataset", "/app/dataset"]
 
 # The Flask flight app listens on port 5002.

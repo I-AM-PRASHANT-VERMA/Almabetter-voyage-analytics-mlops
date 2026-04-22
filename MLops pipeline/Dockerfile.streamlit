@@ -22,6 +22,7 @@ RUN mkdir -p "/app/joblib files"
 
 # Copy the app code, the Streamlit config, and the dataset used for local summaries.
 COPY ["streamlit", "/app/streamlit"]
+COPY ["monitoring.py", "/app/monitoring.py"]
 COPY [".streamlit", "/app/.streamlit"]
 COPY ["dataset", "/app/dataset"]
 
