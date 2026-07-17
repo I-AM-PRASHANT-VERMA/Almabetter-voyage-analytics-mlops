@@ -103,4 +103,4 @@ git branch
 
 ## Notes for Reviewers
 
-The development workflows explain the analysis and modeling work. The local MLOps code shows how the project can be run as services and prepared for deployment. The regression model is the main focus of the deeper MLOps workflow.
+The notebooks explain the analysis and modeling work. The local MLOps code shows how the project can be run as services and prepared for deployment. The regression model is the main focus of the deeper MLOps workflow.

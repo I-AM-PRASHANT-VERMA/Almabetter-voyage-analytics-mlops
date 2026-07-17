@@ -9,6 +9,7 @@ The root `README.md` gives a short overview. These files give more detail for ev
 | File | Topic |
 | --- | --- |
 | `01_project_overview.md` | Project goal and end-to-end workflow |
+| `02_notebooks_and_modeling.md` | Notebook work and model-building flow |
 | `03_local_training_and_mlflow.md` | Local training, MLflow tracking, and model export |
 | `04_flask_apis_and_streamlit_apps.md` | Flask APIs and Streamlit user apps |
 | `05_docker_compose_local_setup.md` | Local Docker Compose services |

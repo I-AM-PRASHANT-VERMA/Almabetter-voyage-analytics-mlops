@@ -63,7 +63,7 @@ http://localhost:8090
 
 ## Expected Output
 
-After startup, the APIs should respond to health checks and the Streamlit apps should open in the browser. The dashboards allow users to interact with the saved model workflows without running development workflow cells manually.
+After startup, the APIs should respond to health checks and the Streamlit apps should open in the browser. The dashboards allow users to interact with the saved model workflows without running notebook cells manually.
 
 ## Notes
 

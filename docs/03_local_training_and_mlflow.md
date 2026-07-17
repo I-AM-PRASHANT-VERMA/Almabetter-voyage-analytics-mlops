@@ -1,6 +1,6 @@
 # Local Training and MLflow
 
-This part covers the repeatable flight price model training workflow. The goal is to move from development workflow experimentation to a script-based workflow that can be validated, tracked, and reused.
+This part covers the repeatable flight price model training workflow. The goal is to move from notebook experimentation to a script-based workflow that can be validated, tracked, and reused.
 
 ## Important Files
 
@@ -14,7 +14,7 @@ This part covers the repeatable flight price model training workflow. The goal i
 
 ## Local Training Role
 
-The local training script prepares data, trains the flight price regression model, evaluates metrics, and saves model outputs. It is useful when the model needs to be trained outside interactive in a repeatable way.
+The local training script prepares data, trains the flight price regression model, evaluates metrics, and saves model outputs. It is useful when the model needs to be trained outside Colab in a repeatable way.
 
 ## MLflow Role
 

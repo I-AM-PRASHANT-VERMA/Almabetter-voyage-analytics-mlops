@@ -9,6 +9,8 @@ __pycache__/
 .mlflow_temp/
 MLops pipeline/runtime_logs/
 
+# Local notebooks and editor noise
+.ipynb_checkpoints/
 
 # Generated Azure helper files kept only on the local machine
 .azure/acr-build-context/

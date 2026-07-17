@@ -1,13 +1,13 @@
 # Project Overview
 
-Voyage Analytics is an end-to-end machine learning and MLOps project for travel data. The project uses users, flights, and hotels datasets to build analysis development workflows, machine learning models, APIs, dashboards, and deployment workflows.
+Voyage Analytics is an end-to-end machine learning and MLOps project for travel data. The project uses users, flights, and hotels datasets to build analysis notebooks, machine learning models, APIs, dashboards, and deployment workflows.
 
 The work is divided into two parts:
 
-1. interactive development workflows for analysis, model development, and explanation.
+1. Colab notebooks for analysis, model development, and explanation.
 2. Local MLOps code for repeatable training, serving, orchestration, CI/CD, deployment, and monitoring.
 
-This separation is intentional. development workflows are better for exploration and presentation. The local MLOps pipeline is better for repeatable execution and deployment.
+This separation is intentional. Notebooks are better for exploration and presentation. The local MLOps pipeline is better for repeatable execution and deployment.
 
 ## Main Use Cases
 
@@ -21,7 +21,7 @@ This separation is intentional. development workflows are better for exploration
 
 ```text
 Dataset
-  -> EDA and modeling development workflows
+  -> EDA and modeling notebooks
   -> local training scripts
   -> MLflow experiment tracking
   -> saved model artifacts
@@ -38,10 +38,10 @@ Dataset
 
 | Folder | Role |
 | --- | --- |
-| `EDA_development workflow_` | Exploratory data analysis |
-| `Flight Price Prediction Regression ML Model` | Flight regression development workflow |
-| `hotel_recommendation_ML_model` | Hotel recommendation development workflow |
-| `Gender_classification_ML_model` | Gender classification development workflow |
+| `EDA_Notebook_` | Exploratory data analysis |
+| `Flight Price Prediction Regression ML Model` | Flight regression notebook |
+| `hotel_recommendation_ML_model` | Hotel recommendation notebook |
+| `Gender_classification_ML_model` | Gender classification notebook |
 | `local_training` | Local flight model training script |
 | `MLops pipeline` | Production-style MLOps workflow |
 | `dataset` | Source datasets and baseline files |
