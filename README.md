@@ -30,6 +30,8 @@ The project covers three main use cases:
 
 The notebooks and the local MLOps code have different roles. The notebooks show the analysis and model experimentation work. The local MLOps pipeline shows how the selected work can be organized into repeatable scripts, APIs, dashboards, containers, and deployment files.
 
+The flight regression notebook and the local serving workflow also have separate model-selection results. The W&B notebook experiment selected Random Forest Regularized as its tracked notebook artifact. The local MLflow workflow retrained the candidates independently and promoted XGBoost Regularized as the model used by the Flask API and deployment flow.
+
 ---
 
 ## What Is Inside
@@ -175,6 +177,14 @@ Additional tools used in the workflow:
 - Streamlit for dashboards
 - Docker Compose for local service orchestration
 - Kubernetes and Azure for deployment support
+
+---
+
+## Validation Scope
+
+The flight dataset contains highly structured pricing relationships and many repeated feature-target patterns. The notebook removes repeated model-input and price combinations before its chronological W&B comparison. The local workflow also records time-based and unseen-group evaluation results before promoting its serving model.
+
+These metrics show performance within the provided project dataset. They should not be treated as guaranteed performance on external airline data with different routes, agencies, demand conditions, or pricing rules.
 
 ---
 

@@ -33,8 +33,21 @@ The local MLOps pipeline exists to show how the selected work can be made repeat
 | Good for explanation | Good for automation and deployment |
 | Runs in Colab | Runs locally through scripts and containers |
 
+## Flight Regression Model Selection
+
+The flight notebook and the local pipeline run separate model comparisons:
+
+| Workflow | Selected model | Role |
+| --- | --- | --- |
+| Colab and W&B notebook experiment | Random Forest Regularized | Tracked notebook artifact for experiment comparison and versioning |
+| Local training and MLflow workflow | XGBoost Regularized | Serving artifact used by the API, dashboard, validation, and deployment flow |
+
+The model names are different because the local workflow retrains the candidates and adds an unseen-group comparison for route, flight type, and agency combinations. The W&B notebook result is not copied directly into the local serving pipeline.
+
 ## Regression Model Focus
 
 The MLOps workflow mainly focuses on the flight price regression model because the assignment asks the video presentation to explain the regression model through modeling, deployment, scheduling, pipelining, and monitoring.
 
 The hotel and gender components are also included as working model applications, but the deepest MLOps workflow is built around the flight price regression flow.
+
+The reported regression scores are specific to the provided structured dataset and are not a guarantee of accuracy on external airline pricing data.

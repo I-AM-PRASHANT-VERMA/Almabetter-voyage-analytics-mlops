@@ -16,6 +16,12 @@ This part covers the repeatable flight price model training workflow. The goal i
 
 The local training script prepares data, trains the flight price regression model, evaluates metrics, and saves model outputs. It is useful when the model needs to be trained outside Colab in a repeatable way.
 
+## Current Serving Model
+
+The local workflow currently promotes XGBoost Regularized as the flight price serving model. This is separate from the W&B notebook experiment, where Random Forest Regularized was saved as the tracked notebook artifact.
+
+The local model is used by the Flask API, Streamlit app, Docker services, validation scripts, and deployment files. The notebook model remains part of the Colab and W&B experiment record.
+
 ## MLflow Role
 
 MLflow is used to track experiment runs, parameters, metrics, and artifacts. This helps compare model runs and keep a record of which model version was selected.
@@ -75,4 +81,6 @@ The MLflow workflow can regenerate and promote the flight price serving artifact
 
 ## Notes
 
-The model may show very high performance because the dataset has a structured pricing pattern. The project includes duplicate cleanup and feature-overlap checks to reduce leakage risk, but results should still be understood within the limits of the provided dataset.
+The model may show very high performance because the dataset has a structured pricing pattern. The project includes duplicate cleanup, chronological evaluation, feature-overlap checks, and an unseen-group comparison to reduce obvious memorization risk.
+
+The time-based and group-holdout values are project validation results used during candidate comparison. They are not an independent external benchmark, and they do not guarantee the same accuracy on airline data with different routes, agencies, demand conditions, or pricing rules.
