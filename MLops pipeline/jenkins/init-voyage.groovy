@@ -75,11 +75,18 @@ def scm = new GitSCM(
 job.setScm(scm)
 
 // Accept GitHub push events when a webhook is available. Polling is the local fallback.
-job.getTriggers().keySet().toList().each { descriptor ->
-    job.removeTrigger(descriptor)
+def existingTriggers = job.getTriggers().values()
+if (!existingTriggers.any { trigger -> trigger instanceof GitHubPushTrigger }) {
+    job.addTrigger(new GitHubPushTrigger())
 }
-job.addTrigger(new GitHubPushTrigger())
-job.addTrigger(new SCMTrigger("H/5 * * * *"))
+
+def pollingTrigger = existingTriggers.find { trigger -> trigger instanceof SCMTrigger }
+if (pollingTrigger == null) {
+    job.addTrigger(new SCMTrigger("H/5 * * * *"))
+} else if (pollingTrigger.spec != "H/5 * * * *") {
+    job.removeTrigger(pollingTrigger.descriptor)
+    job.addTrigger(new SCMTrigger("H/5 * * * *"))
+}
 
 // -----------------------------
 // 4. Define CI shell steps
