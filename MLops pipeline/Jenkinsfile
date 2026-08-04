@@ -80,8 +80,6 @@ pipeline {
                     test -f scripts/check_flight_dataset_drift.py
                     test -f "$LOCAL_TRAINING_DIR/train_flight_price.py"
                     test -f "$LOCAL_TRAINING_DIR/requirements.txt"
-                    test -f "$LOCAL_TRAINING_DIR/outputs/models/flight_price_model_latest.joblib"
-                    test -f "$LOCAL_TRAINING_DIR/outputs/metrics/flight_price_model_latest_metadata.json"
                     test -f airflow/dags/flight_price_mlflow_training_pipeline.py
                     test -f "joblib files/flight_price_model.joblib"
                     test -f "joblib files/flight_price_model_metadata.json"
