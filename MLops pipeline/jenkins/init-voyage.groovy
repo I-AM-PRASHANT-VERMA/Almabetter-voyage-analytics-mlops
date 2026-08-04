@@ -3,11 +3,17 @@ import hudson.model.ParametersDefinitionProperty
 import hudson.model.BooleanParameterDefinition
 import hudson.model.FreeStyleProject
 import hudson.tasks.Shell
+import hudson.plugins.git.BranchSpec
+import hudson.plugins.git.GitSCM
+import hudson.plugins.git.UserRemoteConfig
+import hudson.plugins.git.extensions.impl.WipeWorkspace
+import hudson.triggers.SCMTrigger
 import jenkins.model.Jenkins
 import hudson.security.HudsonPrivateSecurityRealm
 import hudson.security.FullControlOnceLoggedInAuthorizationStrategy
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition
 import org.jenkinsci.plugins.workflow.job.WorkflowJob
+import com.cloudbees.jenkins.GitHubPushTrigger
 
 // -----------------------------
 // 1. Read Jenkins instance and credentials
@@ -46,7 +52,7 @@ if (job == null) {
 }
 
 // Keep the job description practical so the Jenkins dashboard stays readable.
-job.setDescription("Voyage Analytics local MLOps CI job. It validates project files, promoted joblib models, local training outputs, and Docker Compose config.")
+job.setDescription("Voyage Analytics CI job. It checks out GitHub main, validates the tracked models and project files, and verifies Docker Compose without deploying to Azure.")
 
 // Replace old parameter definitions so rerunning this init script stays idempotent.
 job.removeProperty(ParametersDefinitionProperty)
@@ -54,6 +60,26 @@ job.addProperty(new ParametersDefinitionProperty(
     new BooleanParameterDefinition("BUILD_DOCKER_IMAGES", false, "Build Docker images after validation."),
     new BooleanParameterDefinition("ENABLE_DEPLOYMENT", false, "Keep this disabled until Kubernetes and Azure settings are confirmed.")
 ))
+
+// Always validate the public GitHub main branch instead of the mounted host checkout.
+def repoUrl = "https://github.com/I-AM-PRASHANT-VERMA/Almabetter-voyage-analytics-mlops.git"
+def scm = new GitSCM(
+    [new UserRemoteConfig(repoUrl, null, null, null)],
+    [new BranchSpec("*/main")],
+    false,
+    [],
+    null,
+    null,
+    [new WipeWorkspace()]
+)
+job.setScm(scm)
+
+// Accept GitHub push events when a webhook is available. Polling is the local fallback.
+job.getTriggers().keySet().toList().each { descriptor ->
+    job.removeTrigger(descriptor)
+}
+job.addTrigger(new GitHubPushTrigger())
+job.addTrigger(new SCMTrigger("H/5 * * * *"))
 
 // -----------------------------
 // 4. Define CI shell steps
@@ -63,16 +89,19 @@ job.getBuildersList().clear()
 job.getBuildersList().add(new Shell('''
 set -e
 
-# Mounted project path inside the Jenkins container.
-PROJECT_ROOT="/workspace/voyage-analytics-mlops"
+# Jenkins checks out the repository before this shell step runs.
+PROJECT_ROOT="$WORKSPACE/MLops pipeline"
+LOCAL_TRAINING_DIR="$WORKSPACE/local_training"
 # Use a temporary venv inside the container so host files stay untouched.
 VENV_DIR="/tmp/voyage-jenkins-ci-venv"
 # Store validation outputs where Jenkins can archive them later.
-JENKINS_OUTPUT_DIR="$PROJECT_ROOT/jenkins_artifacts"
+JENKINS_OUTPUT_DIR="$WORKSPACE/jenkins_artifacts"
+export LOCAL_TRAINING_DIR
 
 python3 --version
 test -d "$PROJECT_ROOT"
 test -f "$PROJECT_ROOT/Jenkinsfile"
+test -f "$LOCAL_TRAINING_DIR/train_flight_price.py"
 
 # Recreate the virtual environment on each run for a clean dependency state.
 rm -rf "$VENV_DIR"
@@ -143,8 +172,9 @@ pipeline {
 }
 """
 
-cdJob.setDescription("Voyage Analytics CD job. It validates the project, then can build flight images, push them to ACR, and deploy to AKS when DEPLOY_TO_AKS is enabled.")
+cdJob.setDescription("Voyage Analytics Azure CD job. It is disabled while the Azure environment is stopped.")
 cdJob.setDefinition(new CpsFlowDefinition(cdPipelineScript, true))
+cdJob.setDisabled(true)
 cdJob.save()
 
 // -----------------------------

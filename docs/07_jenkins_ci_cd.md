@@ -1,6 +1,6 @@
 # Jenkins CI/CD Workflow
 
-Jenkins is used to demonstrate CI/CD for the MLOps project. It validates the project, checks Docker configuration, can build images, and includes an Azure AKS deployment pipeline.
+Jenkins validates the project automatically against the GitHub `main` branch. It checks the tracked models and Docker configuration. Azure deployment remains disabled while the cloud environment is stopped.
 
 ## Main Files
 
@@ -28,6 +28,19 @@ http://localhost:8081
 
 Default local credentials are configured through environment variables in Docker Compose. The placeholder password is only for the local demo.
 
+The Jenkins container uses `restart: unless-stopped`, so it comes back when Docker Desktop starts. Docker Desktop and the computer still need to be running for local Jenkins automation.
+
+## Automatic GitHub CI
+
+The local CI job checks out a clean copy of GitHub `main` before every build. It supports two triggers:
+
+- GitHub push webhook at `https://your-safe-public-endpoint/github-webhook/`
+- SCM polling every five minutes as a local fallback
+
+Do not point GitHub at `localhost`; GitHub cannot reach a private computer address. Only add the webhook after a stable HTTPS endpoint is available. The polling fallback needs no public tunnel and detects new commits while Jenkins is running.
+
+Automatic builds keep `BUILD_DOCKER_IMAGES` and `ENABLE_DEPLOYMENT` set to `false`, so push events run validation only.
+
 ## Local CI Pipeline Stages
 
 The local `Jenkinsfile` includes stages such as:
@@ -42,7 +55,7 @@ The local `Jenkinsfile` includes stages such as:
 
 ## Azure AKS CD Pipeline Stages
 
-The Azure pipeline includes:
+The Azure pipeline job is currently disabled. Its saved stages include:
 
 - project validation
 - Azure login check

@@ -2,7 +2,8 @@
 # -----------------------------
 # 1. Base Jenkins image
 # -----------------------------
-FROM jenkins/jenkins:lts-jdk17  # start from the official Jenkins LTS image with Java 17.
+# Start from the official Jenkins LTS image with Java 17.
+FROM jenkins/jenkins:lts-jdk17
 
 USER root
 
@@ -35,6 +36,7 @@ RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash \
 RUN jenkins-plugin-cli --plugins \
         workflow-aggregator \
         git \
+        github \
         credentials-binding \
         ws-cleanup \
         timestamper \
@@ -43,7 +45,8 @@ RUN jenkins-plugin-cli --plugins \
 # -----------------------------
 # 5. Copy startup configuration
 # -----------------------------
-COPY jenkins/init-voyage.groovy /usr/share/jenkins/ref/init.groovy.d/init-voyage.groovy  # seed the local Jenkins user and demo job.
+# Seed the local Jenkins user and jobs.
+COPY jenkins/init-voyage.groovy /usr/share/jenkins/ref/init.groovy.d/init-voyage.groovy
 
 # -----------------------------
 # 6. Keep Docker access available
