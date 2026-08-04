@@ -41,8 +41,6 @@ REQUIRED_FILES = [
     "airflow/dags/flight_price_mlflow_training_pipeline.py",
     "local_training/train_flight_price.py",
     "local_training/requirements.txt",
-    "local_training/outputs/models/flight_price_model_latest.joblib",
-    "local_training/outputs/metrics/flight_price_model_latest_metadata.json",
     "scripts/validate_flight_regression_workflow.py",
     "scripts/check_flight_dataset_drift.py",
 ]
@@ -61,7 +59,7 @@ PYTHON_FILES = [
     "scripts/check_flight_dataset_drift.py",
 ]
 
-MLFLOW_OUTPUTS = [
+OPTIONAL_TRAINING_OUTPUTS = [
     "local_training/outputs/models/flight_price_model_latest.joblib",
     "local_training/outputs/metrics/flight_price_model_latest_metadata.json",
     "jenkins_artifacts/data_drift/flight_dataset_drift_summary.json",
@@ -263,47 +261,73 @@ def validate_gender_model():
     }
 
 
-def validate_mlflow_airflow_outputs():
+def inspect_optional_training_outputs(serving_model_summary):
     # -----------------------------
-    # 11. Validate training and Airflow outputs
+    # 11. Inspect optional training and Airflow outputs
     # -----------------------------
-    # These outputs prove the local training, drift check, and reporting flow already ran.
-    outputs = []
-    # Loop through each item that needs the same handling.
-    for relative_path in MLFLOW_OUTPUTS:
-        path = require_file(relative_path)
-        outputs.append({"path": relative_path, "size_bytes": path.stat().st_size})
+    # These generated files are useful evidence when present, but a fresh clone should not require them.
+    available_files = []
+    missing_files = []
+    errors = []
 
-    drift_summary = json.loads(require_file("jenkins_artifacts/data_drift/flight_dataset_drift_summary.json").read_text())
-    local_metadata = json.loads(
-        require_file("local_training/outputs/metrics/flight_price_model_latest_metadata.json").read_text(encoding="utf-8")
-    )
+    for relative_path in OPTIONAL_TRAINING_OUTPUTS:
+        path = project_path(relative_path)
+        if path.exists() and path.is_file() and path.stat().st_size > 0:
+            available_files.append({"path": relative_path, "size_bytes": path.stat().st_size})
+        else:
+            missing_files.append(relative_path)
+
+    drift_summary = {}
+    drift_path = project_path("jenkins_artifacts/data_drift/flight_dataset_drift_summary.json")
+    if drift_path.exists() and drift_path.stat().st_size > 0:
+        try:
+            drift_summary = json.loads(drift_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"Invalid drift summary: {exc}")
+
+    local_metadata = {}
+    local_metadata_path = project_path("local_training/outputs/metrics/flight_price_model_latest_metadata.json")
+    if local_metadata_path.exists() and local_metadata_path.stat().st_size > 0:
+        try:
+            local_metadata = json.loads(local_metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"Invalid local training metadata: {exc}")
 
     metrics_dir = project_path("local_training/outputs/metrics")
-    feature_importance_files = sorted(
-        metrics_dir.glob("flight_price_feature_importance_*.csv"),
-        key=lambda path: path.stat().st_mtime,
+    feature_importance_files = (
+        sorted(metrics_dir.glob("flight_price_feature_importance_*.csv"), key=lambda path: path.stat().st_mtime)
+        if metrics_dir.exists()
+        else []
     )
-    worst_prediction_files = sorted(
-        metrics_dir.glob("flight_price_worst_predictions_*.csv"),
-        key=lambda path: path.stat().st_mtime,
+    worst_prediction_files = (
+        sorted(metrics_dir.glob("flight_price_worst_predictions_*.csv"), key=lambda path: path.stat().st_mtime)
+        if metrics_dir.exists()
+        else []
     )
 
-    if not feature_importance_files:
-        # Stop execution with a clear error when the input is invalid.
-        raise FileNotFoundError("No local training feature importance report was found.")
-
-    if not worst_prediction_files:
-        # Stop execution with a clear error when the input is invalid.
-        raise FileNotFoundError("No local training worst prediction report was found.")
+    status = "available" if not missing_files else "partial" if available_files else "not_available"
+    if errors:
+        status = "invalid"
+    matches_serving_version = (
+        local_metadata.get("version_id") == serving_model_summary.get("version_id") if local_metadata else None
+    )
+    if not errors and matches_serving_version is False:
+        status = "stale"
 
     return {
-        "files": outputs,
+        "status": status,
+        "required_for_ci": False,
+        "available_files": available_files,
+        "missing_files": missing_files,
+        "errors": errors,
         "drift_detected": drift_summary.get("drift_detected"),
-        "selected_mlflow_model": local_metadata.get("selected_model"),
+        "local_selected_model": local_metadata.get("selected_model"),
+        "local_version_id": local_metadata.get("version_id"),
+        "serving_version_id": serving_model_summary.get("version_id"),
+        "matches_serving_version": matches_serving_version,
         "selected_group_rmse": local_metadata.get("metrics", {}).get("group_rmse"),
-        "latest_feature_importance_report": display_path(feature_importance_files[-1]),
-        "latest_worst_prediction_report": display_path(worst_prediction_files[-1]),
+        "latest_feature_importance_report": display_path(feature_importance_files[-1]) if feature_importance_files else None,
+        "latest_worst_prediction_report": display_path(worst_prediction_files[-1]) if worst_prediction_files else None,
     }
 
 
@@ -315,16 +339,17 @@ def main():
     args = parse_args()
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    flight_model_summary = validate_flight_model()
 
     summary = {
         "required_files": check_required_files(),
         "compiled_python_files": check_python_syntax(),
         "models": {
-            "flight_price": validate_flight_model(),
+            "flight_price": flight_model_summary,
             "hotel_recommendation": validate_hotel_model(),
             "gender_classification": validate_gender_model(),
         },
-        "mlflow_airflow_outputs": validate_mlflow_airflow_outputs(),
+        "optional_training_evidence": inspect_optional_training_outputs(flight_model_summary),
     }
 
     summary_path = output_dir / "jenkins_ci_summary.json"
@@ -335,8 +360,7 @@ def main():
     print(f"Flight model: {summary['models']['flight_price']['selected_model']}")
     print(f"Hotel model: {summary['models']['hotel_recommendation']['best_model_name']}")
     print(f"Gender samples: {summary['models']['gender_classification']['sample_predictions']}")
-    print(f"MLflow model: {summary['mlflow_airflow_outputs']['selected_mlflow_model']}")
-    print(f"Group RMSE: {summary['mlflow_airflow_outputs']['selected_group_rmse']}")
+    print(f"Optional training evidence: {summary['optional_training_evidence']['status']}")
 
 
 if __name__ == "__main__":

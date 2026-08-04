@@ -152,6 +152,39 @@ def load_metadata():
     return metadata
 
 
+def inspect_optional_local_training_outputs(serving_metadata):
+    # Local training outputs are generated evidence and are not included in a fresh clone.
+    paths = [LOCAL_LATEST_MODEL_PATH, LOCAL_LATEST_METADATA_PATH]
+    available_files = [display_path(path) for path in paths if path.exists() and path.stat().st_size > 0]
+    missing_files = [display_path(path) for path in paths if not path.exists() or path.stat().st_size == 0]
+
+    result = {
+        "status": "available" if not missing_files else "partial" if available_files else "not_available",
+        "available_files": available_files,
+        "missing_files": missing_files,
+        "required_for_ci": False,
+    }
+
+    if LOCAL_LATEST_METADATA_PATH.exists() and LOCAL_LATEST_METADATA_PATH.stat().st_size > 0:
+        try:
+            local_metadata = json.loads(LOCAL_LATEST_METADATA_PATH.read_text(encoding="utf-8"))
+            matches_serving_version = local_metadata.get("version_id") == serving_metadata.get("version_id")
+            result.update(
+                {
+                    "local_selected_model": local_metadata.get("selected_model"),
+                    "local_version_id": local_metadata.get("version_id"),
+                    "matches_serving_version": matches_serving_version,
+                }
+            )
+            if not matches_serving_version:
+                result["status"] = "stale"
+        except (OSError, json.JSONDecodeError) as exc:
+            result["status"] = "invalid"
+            result["metadata_error"] = str(exc)
+
+    return result
+
+
 def build_sample_input(flights_df):
     # -----------------------------
     # 7. Build one realistic prediction row
@@ -182,8 +215,6 @@ def validate_promoted_model():
     # -----------------------------
     ensure_file_exists(DATASET_PATH, "Flight dataset")
     ensure_file_exists(MODEL_PATH, "Promoted model file")
-    ensure_file_exists(LOCAL_LATEST_MODEL_PATH, "Latest local training model file")
-    ensure_file_exists(LOCAL_LATEST_METADATA_PATH, "Latest local training metadata file")
 
     metadata = load_metadata()
     model = joblib.load(MODEL_PATH)  # load the exact promoted joblib used by API and Streamlit.
@@ -220,11 +251,13 @@ def main():
 
     compiled_files = compile_python_sources()
     model_summary = validate_promoted_model()
+    optional_training_outputs = inspect_optional_local_training_outputs(model_summary)
 
     summary = {
         "dataset_file": display_path(DATASET_PATH),
         "compiled_files": compiled_files,
         "promoted_model_summary": model_summary,
+        "optional_local_training_outputs": optional_training_outputs,
     }
 
     summary_path = output_dir / "validation_summary.json"
@@ -235,6 +268,7 @@ def main():
     print(f"Validated model: {model_summary['selected_model']}")
     print(f"Strict validation: {model_summary['strict_validation']}")
     print(f"Sample prediction: {model_summary['sample_prediction']}")
+    print(f"Optional local training evidence: {optional_training_outputs['status']}")
 
 
 if __name__ == "__main__":
