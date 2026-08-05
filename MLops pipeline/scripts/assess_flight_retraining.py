@@ -22,9 +22,9 @@ RETRAINING_PATHS = (
 
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(chunk)
+    with path.open("r", encoding="utf-8", newline=None) as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), ""):
+            digest.update(chunk.encode("utf-8"))
     return digest.hexdigest()
 
 
