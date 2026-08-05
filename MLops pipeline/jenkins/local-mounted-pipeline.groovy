@@ -37,6 +37,7 @@ pipeline {
         // Jenkins artifacts are saved here and then archived in post steps.
         JENKINS_OUTPUT_DIR = '/workspace/voyage-analytics-mlops/jenkins_artifacts'
         PYTHONUNBUFFERED = '1'
+        PIP_CACHE_DIR = '/var/jenkins_home/pip-cache'
     }
 
     stages {

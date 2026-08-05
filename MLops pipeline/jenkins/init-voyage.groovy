@@ -107,6 +107,7 @@ VENV_DIR="/tmp/voyage-jenkins-ci-venv"
 # Store validation outputs where Jenkins can archive them later.
 JENKINS_OUTPUT_DIR="$WORKSPACE/jenkins_artifacts"
 export LOCAL_TRAINING_DIR
+export PIP_CACHE_DIR="/var/jenkins_home/pip-cache"
 
 python3 --version
 test -d "$PROJECT_ROOT"

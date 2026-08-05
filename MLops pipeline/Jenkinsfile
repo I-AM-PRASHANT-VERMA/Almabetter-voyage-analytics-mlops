@@ -31,6 +31,7 @@ pipeline {
     environment {
         // Keep Python logs visible immediately in the Jenkins console.
         PYTHONUNBUFFERED = '1'
+        PIP_CACHE_DIR = '/var/jenkins_home/pip-cache'
         // Use a workspace-local virtual environment so dependencies do not leak globally.
         VENV_DIR = "${WORKSPACE}/.jenkins-venv"
         // Store validation reports in one folder so Jenkins can archive them.

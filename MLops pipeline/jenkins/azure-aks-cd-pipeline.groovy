@@ -47,6 +47,7 @@ pipeline {
         KEY_VAULT_NAME = 'kv-voyage-mlops-v2'
         // Force unbuffered Python logs so Jenkins console output stays live.
         PYTHONUNBUFFERED = '1'
+        PIP_CACHE_DIR = '/var/jenkins_home/pip-cache'
     }
 
     stages {
