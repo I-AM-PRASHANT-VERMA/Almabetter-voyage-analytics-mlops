@@ -25,6 +25,7 @@
     "cv_splits": 3,
     "tuning_iterations": 5,
     "dataset_info": {
+        "dataset_sha256": "5fdd8b85291f198fa8ccbf9549e2617e4a493f12f98a8b54229f6c6a326d9408",
         "rows_before_duplicate_cleanup": 271888,
         "rows_after_duplicate_cleanup": 149484,
         "train_rows": 119587,

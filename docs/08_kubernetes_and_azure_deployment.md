@@ -28,8 +28,11 @@ The Azure Kubernetes setup includes:
 ## Deployment Flow
 
 ```text
-Build Docker images
+Validate current GitHub main
+  -> retrain and promote the flight model when required
+  -> build Docker images
   -> push images to Azure Container Registry
+  -> start the existing AKS cluster when stopped
   -> apply Kubernetes manifests
   -> update deployment images
   -> wait for rollout status
@@ -40,13 +43,14 @@ Build Docker images
 
 The Azure Jenkins pipeline performs the deployment through these main actions:
 
-1. Validate the project.
-2. Log in to Azure using Jenkins credentials.
-3. Build API and Streamlit Docker images.
-4. Push images to Azure Container Registry.
-5. Apply Kubernetes manifests to AKS.
-6. Add Application Insights connection string through a Kubernetes secret.
-7. Run smoke tests through the gateway.
+1. Validate the project from a clean GitHub `main` checkout.
+2. Check drift and retrain the flight model when required.
+3. Log in to the existing Azure subscription using Jenkins credentials.
+4. Build and push API and Streamlit images to the existing ACR.
+5. Start the existing AKS cluster when it is stopped.
+6. Apply Kubernetes manifests and update deployment images.
+7. Add the Application Insights connection string from Key Vault.
+8. Run smoke tests through the gateway.
 
 ## Monitoring Connection
 
@@ -69,3 +73,5 @@ After deployment, the AKS namespace should contain running pods and services for
 ## Notes
 
 Azure credentials and real connection strings are not stored in this repository. They must be supplied through Jenkins credentials, Azure CLI, Key Vault, or Kubernetes secrets.
+
+This workflow reuses the existing resource group, ACR, AKS cluster, Key Vault, and Application Insights instance. It does not create Azure infrastructure. Keep `VOYAGE_AZURE_DEPLOYMENT_ENABLED=false` while the subscription is disabled.

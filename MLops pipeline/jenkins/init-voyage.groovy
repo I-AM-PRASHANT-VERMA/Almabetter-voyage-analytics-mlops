@@ -2,6 +2,7 @@
 import hudson.model.ParametersDefinitionProperty
 import hudson.model.BooleanParameterDefinition
 import hudson.model.FreeStyleProject
+import hudson.tasks.ArtifactArchiver
 import hudson.tasks.Shell
 import hudson.plugins.git.BranchSpec
 import hudson.plugins.git.GitSCM
@@ -11,7 +12,7 @@ import hudson.triggers.SCMTrigger
 import jenkins.model.Jenkins
 import hudson.security.HudsonPrivateSecurityRealm
 import hudson.security.FullControlOnceLoggedInAuthorizationStrategy
-import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition
+import org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition
 import org.jenkinsci.plugins.workflow.job.WorkflowJob
 import com.cloudbees.jenkins.GitHubPushTrigger
 
@@ -24,6 +25,9 @@ def instance = Jenkins.get()
 // Allow local admin credentials to come from container env vars.
 def adminId = System.getenv("JENKINS_ADMIN_ID") ?: "prashant_jenkins"
 def adminPassword = System.getenv("JENKINS_ADMIN_PASSWORD") ?: "change-me-local"
+def azureDeploymentEnabled = (System.getenv("VOYAGE_AZURE_DEPLOYMENT_ENABLED") ?: "false").toBoolean()
+def repoUrl = System.getenv("VOYAGE_GIT_REPOSITORY") ?: "https://github.com/I-AM-PRASHANT-VERMA/Almabetter-voyage-analytics-mlops.git"
+def repoBranch = System.getenv("VOYAGE_GIT_BRANCH") ?: "main"
 
 // -----------------------------
 // 2. Configure local Jenkins security
@@ -52,20 +56,19 @@ if (job == null) {
 }
 
 // Keep the job description practical so the Jenkins dashboard stays readable.
-job.setDescription("Voyage Analytics CI job. It checks out GitHub main, validates the tracked models and project files, and verifies Docker Compose without deploying to Azure.")
+job.setDescription("Voyage Analytics CI job. It checks out GitHub main, validates the project, checks dataset drift, retrains when required, and calls the gated CD job after success.")
 
 // Replace old parameter definitions so rerunning this init script stays idempotent.
 job.removeProperty(ParametersDefinitionProperty)
 job.addProperty(new ParametersDefinitionProperty(
     new BooleanParameterDefinition("BUILD_DOCKER_IMAGES", false, "Build Docker images after validation."),
-    new BooleanParameterDefinition("ENABLE_DEPLOYMENT", false, "Keep this disabled until Kubernetes and Azure settings are confirmed.")
+    new BooleanParameterDefinition("FORCE_RETRAIN", false, "Run flight model training even when data and training inputs are unchanged.")
 ))
 
-// Always validate the public GitHub main branch instead of the mounted host checkout.
-def repoUrl = "https://github.com/I-AM-PRASHANT-VERMA/Almabetter-voyage-analytics-mlops.git"
+// Always validate the configured GitHub branch instead of the mounted host checkout.
 def scm = new GitSCM(
     [new UserRemoteConfig(repoUrl, null, null, null)],
-    [new BranchSpec("*/main")],
+    [new BranchSpec("*/${repoBranch}")],
     false,
     [],
     null,
@@ -104,6 +107,7 @@ VENV_DIR="/tmp/voyage-jenkins-ci-venv"
 # Store validation outputs where Jenkins can archive them later.
 JENKINS_OUTPUT_DIR="$WORKSPACE/jenkins_artifacts"
 export LOCAL_TRAINING_DIR
+export PIP_CACHE_DIR="/var/jenkins_home/pip-cache"
 
 python3 --version
 test -d "$PROJECT_ROOT"
@@ -124,6 +128,35 @@ pip install -r requirements.txt
 python scripts/validate_jenkins_ci.py --output-dir "$JENKINS_OUTPUT_DIR/ci_validation_from_jenkins_job"
 python scripts/validate_flight_regression_workflow.py --output-dir "$JENKINS_OUTPUT_DIR/flight_validation_from_jenkins_job"
 
+# Build a small change list for the retraining decision. Drift and dataset fingerprints are checked separately.
+CHANGED_FILES="$JENKINS_OUTPUT_DIR/changed_files.txt"
+if [ -n "$GIT_PREVIOUS_SUCCESSFUL_COMMIT" ] && git cat-file -e "$GIT_PREVIOUS_SUCCESSFUL_COMMIT^{commit}" 2>/dev/null; then
+    git -C "$WORKSPACE" diff --name-only "$GIT_PREVIOUS_SUCCESSFUL_COMMIT" HEAD > "$CHANGED_FILES"
+elif git -C "$WORKSPACE" rev-parse HEAD^ >/dev/null 2>&1; then
+    git -C "$WORKSPACE" diff --name-only HEAD^ HEAD > "$CHANGED_FILES"
+else
+    : > "$CHANGED_FILES"
+fi
+
+python scripts/check_flight_dataset_drift.py
+FORCE_ARG=""
+if [ "$FORCE_RETRAIN" = "true" ]; then
+    FORCE_ARG="--force"
+fi
+python scripts/assess_flight_retraining.py \
+    --changed-files-file "$CHANGED_FILES" \
+    --properties-output "$JENKINS_OUTPUT_DIR/retraining.properties" \
+    $FORCE_ARG
+. "$JENKINS_OUTPUT_DIR/retraining.properties"
+
+if [ "$RETRAIN_REQUIRED" = "true" ]; then
+    export MLFLOW_ALLOW_FILE_STORE=true
+    python scripts/run_flight_price_mlflow_experiments.py --profile standard
+    python scripts/validate_flight_regression_workflow.py --output-dir "$JENKINS_OUTPUT_DIR/post_training_flight_validation"
+else
+    echo "Flight retraining is not required for this build."
+fi
+
 # Save the fully resolved compose file when Docker CLI is available in the container.
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
     docker compose --profile mlops --profile mlflow config > "$JENKINS_OUTPUT_DIR/docker-compose-resolved-from-jenkins.yml"
@@ -141,14 +174,16 @@ if [ "$BUILD_DOCKER_IMAGES" = "true" ]; then
         mlflow-ui mlflow-training
 fi
 
-# Deployment stays blocked here until CD settings are intentionally enabled.
-if [ "$ENABLE_DEPLOYMENT" = "true" ]; then
-    echo "Deployment is intentionally blocked until Kubernetes and Azure settings are confirmed."
-    exit 2
-fi
+# This helper is a no-op unless the container-level Azure switch is explicitly true.
+python scripts/trigger_jenkins_cd.py
 
 echo "Voyage Analytics Jenkins CI completed."
 '''))
+
+job.getPublishersList().clear()
+job.getPublishersList().add(new ArtifactArchiver(
+    "jenkins_artifacts/**, MLops pipeline/jenkins_artifacts/**, MLops pipeline/monitoring_reports/**"
+))
 
 job.save()
 
@@ -163,25 +198,16 @@ if (cdJob == null) {
     cdJob = instance.createProject(WorkflowJob, cdJobName)
 }
 
-// Load the CD pipeline script from the mounted repo so source control stays the single truth.
-def cdPipelineFile = new File("/workspace/voyage-analytics-mlops/jenkins/azure-aks-cd-pipeline.groovy")
-def cdPipelineScript = cdPipelineFile.exists() ? cdPipelineFile.text : """
-// Start the Jenkins pipeline definition.
-pipeline {
-    agent any
-    stages {
-        stage('Missing Pipeline File') {
-            steps {
-                error('jenkins/azure-aks-cd-pipeline.groovy was not found in the mounted workspace.')
-            }
-        }
-    }
-}
-"""
-
-cdJob.setDescription("Voyage Analytics Azure CD job. It is disabled while the Azure environment is stopped.")
-cdJob.setDefinition(new CpsFlowDefinition(cdPipelineScript, true))
-cdJob.setDisabled(true)
+// Read the CD pipeline and application code from the same clean GitHub main checkout.
+def cdDefinition = new CpsScmFlowDefinition(scm, "MLops pipeline/jenkins/azure-aks-cd-pipeline.groovy")
+cdDefinition.setLightweight(false)
+cdJob.setDefinition(cdDefinition)
+cdJob.setDescription(
+    azureDeploymentEnabled
+        ? "Voyage Analytics Azure CD job. Automatic deployment is enabled for the existing Azure environment."
+        : "Voyage Analytics Azure CD job. It remains disabled while the Azure environment is stopped."
+)
+cdJob.setDisabled(!azureDeploymentEnabled)
 cdJob.save()
 
 // -----------------------------

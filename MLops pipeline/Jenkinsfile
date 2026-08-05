@@ -21,8 +21,8 @@ pipeline {
         booleanParam(name: 'BUILD_DOCKER_IMAGES', defaultValue: false, description: 'Build all local Docker images after CI validation.')
         // Local CD is a separate manual choice because it restarts containers on this machine.
         booleanParam(name: 'RUN_LOCAL_CD', defaultValue: false, description: 'Restart local Docker containers and verify app health after image build.')
-        // Cloud deployment is intentionally gated in this local Jenkinsfile.
-        booleanParam(name: 'ENABLE_DEPLOYMENT', defaultValue: false, description: 'Reserved for Kubernetes or Azure deployment after local checks are confirmed.')
+        booleanParam(name: 'FORCE_RETRAIN', defaultValue: false, description: 'Retrain the flight model even when data and training inputs are unchanged.')
+        string(name: 'HOST_PROJECT_ROOT', defaultValue: '', description: 'Optional host path used only for local Docker CD.')
     }
 
     // -----------------------------
@@ -31,12 +31,11 @@ pipeline {
     environment {
         // Keep Python logs visible immediately in the Jenkins console.
         PYTHONUNBUFFERED = '1'
+        PIP_CACHE_DIR = '/var/jenkins_home/pip-cache'
         // Use a workspace-local virtual environment so dependencies do not leak globally.
         VENV_DIR = "${WORKSPACE}/.jenkins-venv"
         // Store validation reports in one folder so Jenkins can archive them.
         JENKINS_OUTPUT_DIR = "${WORKSPACE}/jenkins_artifacts"
-        // Windows host path used when Jenkins triggers Docker Desktop local services.
-        HOST_PROJECT_ROOT = 'E:\\E almabetter projects\\1 Voyage_Analytics_MLOps\\MLops pipeline'
         // Local training outputs live outside the MLOps pipeline folder.
         LOCAL_TRAINING_DIR = "${WORKSPACE}/../local_training"
     }
@@ -125,6 +124,30 @@ pipeline {
             }
         }
 
+        stage('Dataset Drift And Retraining') {
+            steps {
+                sh '''
+                    set -e
+                    . "$VENV_DIR/bin/activate"
+                    python scripts/check_flight_dataset_drift.py
+                    FORCE_ARG=""
+                    if [ "$FORCE_RETRAIN" = "true" ]; then
+                        FORCE_ARG="--force"
+                    fi
+                    python scripts/assess_flight_retraining.py \
+                        --properties-output "$JENKINS_OUTPUT_DIR/retraining.properties" \
+                        $FORCE_ARG
+                    . "$JENKINS_OUTPUT_DIR/retraining.properties"
+
+                    if [ "$RETRAIN_REQUIRED" = "true" ]; then
+                        export MLFLOW_ALLOW_FILE_STORE=true
+                        python scripts/run_flight_price_mlflow_experiments.py --profile standard
+                        python scripts/validate_flight_regression_workflow.py --output-dir "$JENKINS_OUTPUT_DIR/post_training_flight_validation"
+                    fi
+                '''
+            }
+        }
+
         // -----------------------------
         // 8. Validate Docker Compose
         // -----------------------------
@@ -188,6 +211,10 @@ EOF
             steps {
                 sh '''
                     set -e
+                    if [ -z "$HOST_PROJECT_ROOT" ]; then
+                        echo "HOST_PROJECT_ROOT is required for local Docker CD."
+                        exit 6
+                    fi
 
                     # Jenkins runs inside Linux, so this override points container mounts back to the Windows host path.
                     cat > "$JENKINS_OUTPUT_DIR/docker-compose.jenkins-cd.yml" <<YAML
@@ -269,18 +296,15 @@ PY
         }
 
         // -----------------------------
-        // 11. Keep cloud deployment gated
+        // 11. Call the separately gated cloud deployment job
         // -----------------------------
         stage('Deployment Gate') {
             steps {
-                script {
-                    // This Jenkinsfile stops before cloud deployment; the Azure CD pipeline handles that separately.
-                    if (params.ENABLE_DEPLOYMENT) {
-                        error('Deployment is intentionally not wired yet. Confirm Kubernetes and Azure settings before enabling this stage.')
-                    }
-
-                    echo 'Deployment is disabled for this Jenkins run. CI validation is complete.'
-                }
+                sh '''
+                    set -e
+                    . "$VENV_DIR/bin/activate"
+                    python scripts/trigger_jenkins_cd.py
+                '''
             }
         }
     }

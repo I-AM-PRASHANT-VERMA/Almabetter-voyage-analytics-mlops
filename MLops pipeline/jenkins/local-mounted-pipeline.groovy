@@ -20,8 +20,7 @@ pipeline {
         booleanParam(name: 'BUILD_DOCKER_IMAGES', defaultValue: false, description: 'Build Docker images after validation.')
         // This flag turns on local restart + smoke test after image build.
         booleanParam(name: 'RUN_LOCAL_CD', defaultValue: false, description: 'Restart local Docker containers and verify app health after image build.')
-        // Keep deployment blocked until cloud settings are confirmed.
-        booleanParam(name: 'ENABLE_DEPLOYMENT', defaultValue: false, description: 'Keep this disabled until Kubernetes and Azure are confirmed.')
+        string(name: 'HOST_PROJECT_ROOT', defaultValue: '', description: 'Optional host path used only for local Docker CD.')
     }
 
     // -----------------------------
@@ -33,13 +32,12 @@ pipeline {
         PROJECT_ROOT = '/workspace/voyage-analytics-mlops'
         // Root local training folder is mounted separately for promoted model checks.
         LOCAL_TRAINING_DIR = '/workspace/local_training'
-        // Host path is needed when Jenkins prepares compose override volumes.
-        HOST_PROJECT_ROOT = 'E:\\E almabetter projects\\1 Voyage_Analytics_MLOps\\MLops pipeline'
         // Disposable venv keeps Python installs isolated per run.
         VENV_DIR = '/tmp/voyage-jenkins-ci-venv'
         // Jenkins artifacts are saved here and then archived in post steps.
         JENKINS_OUTPUT_DIR = '/workspace/voyage-analytics-mlops/jenkins_artifacts'
         PYTHONUNBUFFERED = '1'
+        PIP_CACHE_DIR = '/var/jenkins_home/pip-cache'
     }
 
     stages {
@@ -149,6 +147,11 @@ pipeline {
                     set -e
                     cd "$PROJECT_ROOT"
 
+                    if [ -z "$HOST_PROJECT_ROOT" ]; then
+                        echo "HOST_PROJECT_ROOT is required for local Docker CD."
+                        exit 6
+                    fi
+
                     # Create a compose override so Jenkins uses the host datasets and joblib files.
                     cat > "$JENKINS_OUTPUT_DIR/docker-compose.jenkins-cd.yml" <<YAML
 services:
@@ -229,18 +232,16 @@ PY
         }
 
         // -----------------------------
-        // 10. Block accidental cloud deployment
+        // 10. Call the separately gated cloud deployment job
         // -----------------------------
         stage('Deployment Gate') {
             steps {
-                // Run custom Groovy logic for this part of the pipeline.
-                script {
-                    // Fail fast if someone tries to use this local CI job for cloud deployment.
-                    if (params.ENABLE_DEPLOYMENT) {
-                        error('Deployment is not enabled yet. Confirm Kubernetes and Azure settings first.')
-                    }
-                    echo 'Deployment is disabled for this run. CI validation is complete.'
-                }
+                sh '''
+                    set -e
+                    . "$VENV_DIR/bin/activate"
+                    cd "$PROJECT_ROOT"
+                    python scripts/trigger_jenkins_cd.py
+                '''
             }
         }
     }

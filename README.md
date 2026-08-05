@@ -161,6 +161,8 @@ Start Jenkins for the CI/CD workflow:
 docker compose --profile jenkins up --build
 ```
 
+Jenkins checks GitHub `main`, evaluates flight dataset drift and fingerprints, and retrains when required. Azure CD stays disabled by default through `VOYAGE_AZURE_DEPLOYMENT_ENABLED=false`; enabling that switch later lets successful CI builds continue through the existing ACR and AKS deployment path.
+
 ---
 
 ## Tech Stack

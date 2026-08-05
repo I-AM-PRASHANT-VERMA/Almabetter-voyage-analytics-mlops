@@ -22,6 +22,8 @@ pipeline {
     parameters {
         // Keep AKS deploy optional so the same pipeline can still be used for validation-only runs.
         booleanParam(name: 'DEPLOY_TO_AKS', defaultValue: false, description: 'Deploy the Voyage apps to Azure AKS after validation.')
+        booleanParam(name: 'START_AKS_IF_STOPPED', defaultValue: true, description: 'Start the existing AKS cluster when deployment is enabled and the cluster is stopped.')
+        booleanParam(name: 'FORCE_RETRAIN', defaultValue: false, description: 'Retrain the flight model even when its dataset fingerprint is unchanged.')
         // Allow a manual image tag override when we want a predictable release tag.
         string(name: 'IMAGE_TAG', defaultValue: '', description: 'Optional Docker image tag. Empty uses the current git commit.')
     }
@@ -30,10 +32,9 @@ pipeline {
     // 4. Azure and project settings
     // -----------------------------
     environment {
-        // Point Jenkins to the mounted repo root inside the container.
-        REPO_ROOT = '/workspace/voyage-root'
-        // Point Jenkins to the actual project folder that contains code and manifests.
-        PROJECT_ROOT = '/workspace/voyage-root/MLops pipeline'
+        // The Pipeline-from-SCM job checks out the current GitHub main branch here.
+        REPO_ROOT = "${WORKSPACE}"
+        PROJECT_ROOT = "${WORKSPACE}/MLops pipeline"
         // Create one temporary virtual environment for Python validation steps.
         VENV_DIR = '/tmp/voyage-jenkins-cd-venv'
         // Reuse the Azure Container Registry already created for this project.
@@ -46,6 +47,7 @@ pipeline {
         KEY_VAULT_NAME = 'kv-voyage-mlops-v2'
         // Force unbuffered Python logs so Jenkins console output stays live.
         PYTHONUNBUFFERED = '1'
+        PIP_CACHE_DIR = '/var/jenkins_home/pip-cache'
     }
 
     stages {
@@ -73,8 +75,38 @@ pipeline {
                     python scripts/validate_jenkins_ci.py --output-dir jenkins_artifacts/jenkins_cd_validation
                     # Run the dedicated flight regression validator because flight is still the main training path.
                     python scripts/validate_flight_regression_workflow.py --output-dir jenkins_artifacts/jenkins_cd_flight_validation
-                    # Run the local monitor in fail mode so Jenkins also checks health-style signals.
-                    python scripts/monitor_voyage_workflow.py --output-dir monitoring_reports/jenkins_cd_local_monitor --fail-on-alert
+                    # Save local health evidence without making optional Airflow or stopped Azure services block CD validation.
+                    python scripts/monitor_voyage_workflow.py --output-dir monitoring_reports/jenkins_cd_local_monitor
+                '''
+            }
+        }
+
+        stage('Assess And Retrain Flight Model') {
+            when {
+                expression { params.DEPLOY_TO_AKS }
+            }
+            steps {
+                sh '''
+                    set -e
+                    . "$VENV_DIR/bin/activate"
+                    cd "$PROJECT_ROOT"
+                    python scripts/check_flight_dataset_drift.py
+                    FORCE_ARG=""
+                    if [ "$FORCE_RETRAIN" = "true" ]; then
+                        FORCE_ARG="--force"
+                    fi
+                    python scripts/assess_flight_retraining.py \
+                        --properties-output jenkins_artifacts/cd_retraining.properties \
+                        $FORCE_ARG
+                    . jenkins_artifacts/cd_retraining.properties
+
+                    if [ "$RETRAIN_REQUIRED" = "true" ]; then
+                        export MLFLOW_ALLOW_FILE_STORE=true
+                        python scripts/run_flight_price_mlflow_experiments.py --profile standard
+                        python scripts/validate_flight_regression_workflow.py --output-dir jenkins_artifacts/jenkins_cd_post_training_validation
+                    else
+                        echo "Tracked serving model already matches the flight dataset."
+                    fi
                 '''
             }
         }
@@ -106,8 +138,12 @@ pipeline {
                             --tenant "$AZURE_TENANT_ID" >/dev/null
                         # Select the subscription that owns the Voyage project resources.
                         az account set --subscription "$AZURE_SUBSCRIPTION_ID"
-                        # Print the active account so the log shows where the deploy is going.
-                        az account show -o table
+                        ACCOUNT_STATE="$(az account show --query state -o tsv)"
+                        if [ "$ACCOUNT_STATE" != "Enabled" ]; then
+                            echo "Azure deployment stopped: subscription state is $ACCOUNT_STATE."
+                            exit 3
+                        fi
+                        az account show --query '{name:name,state:state}' -o table
                     '''
                 }
             }
@@ -165,6 +201,32 @@ pipeline {
                     mkdir -p "$PROJECT_ROOT/jenkins_artifacts"
                     # Save the chosen image tag so the next stage uses the exact same release value.
                     echo "$IMAGE_TAG_VALUE" > "$PROJECT_ROOT/jenkins_artifacts/jenkins_cd_image_tag.txt"
+                '''
+            }
+        }
+
+        stage('Ensure Existing AKS Is Running') {
+            when {
+                expression { params.DEPLOY_TO_AKS }
+            }
+            steps {
+                sh '''
+                    set -e
+                    POWER_STATE="$(az aks show -g "$RESOURCE_GROUP" -n "$AKS_NAME" --query powerState.code -o tsv)"
+                    if [ "$POWER_STATE" != "Running" ]; then
+                        if [ "$START_AKS_IF_STOPPED" != "true" ]; then
+                            echo "AKS is $POWER_STATE and automatic start is disabled."
+                            exit 4
+                        fi
+                        echo "Starting the existing AKS cluster before deployment."
+                        az aks start -g "$RESOURCE_GROUP" -n "$AKS_NAME"
+                    fi
+
+                    POWER_STATE="$(az aks show -g "$RESOURCE_GROUP" -n "$AKS_NAME" --query powerState.code -o tsv)"
+                    if [ "$POWER_STATE" != "Running" ]; then
+                        echo "AKS did not reach Running state: $POWER_STATE"
+                        exit 5
+                    fi
                 '''
             }
         }
@@ -279,18 +341,18 @@ pipeline {
     // -----------------------------
     post {
         always {
-            dir('/workspace/voyage-root/MLops pipeline') {
+            dir("${env.PROJECT_ROOT}") {
                 // Archive every Jenkins artifact folder that this pipeline touched.
                 archiveArtifacts artifacts: 'jenkins_artifacts/**, monitoring_reports/**', allowEmptyArchive: true, fingerprint: true
             }
         }
         cleanup {
-            sh '''
-                # Remove the temporary validation environment so the Jenkins container stays tidy.
-                rm -rf "$VENV_DIR"
-                # Remove the temporary smoke-test pod if a failure happened before cleanup inside the stage.
-                kubectl -n voyage-mlops delete pod voyage-gateway-smoke --ignore-not-found=true >/dev/null 2>&1 || true
-            '''
+            script {
+                sh 'rm -rf "$VENV_DIR"'
+                if (params.DEPLOY_TO_AKS) {
+                    sh 'kubectl -n voyage-mlops delete pod voyage-gateway-smoke --ignore-not-found=true >/dev/null 2>&1 || true'
+                }
+            }
         }
     }
 }

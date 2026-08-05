@@ -16,7 +16,7 @@ flight_price_mlflow_training_pipeline
 
 ## DAG Purpose
 
-The DAG checks that required files exist, checks flight dataset drift, runs MLflow experiments, and verifies that expected MLflow outputs are produced.
+The DAG checks that required files exist, checks flight dataset drift, compares the current dataset fingerprint with the promoted model metadata, retrains only when required, and verifies the promoted outputs.
 
 ## Pipeline Tasks
 
@@ -24,8 +24,10 @@ The DAG checks that required files exist, checks flight dataset drift, runs MLfl
 | --- | --- |
 | `check_training_files` | Confirms required scripts and folders are available |
 | `check_dataset_drift` | Runs the flight dataset drift check |
-| `run_mlflow_experiments` | Starts the MLflow experiment script |
+| `assess_retraining` | Combines drift and dataset fingerprint evidence |
+| `run_mlflow_experiments` | Starts MLflow training only when required |
 | `verify_mlflow_outputs` | Checks that expected reports/artifacts were created |
+| `trigger_gated_azure_cd` | Calls Jenkins CD only after a new model is promoted and the Azure switch is enabled |
 
 ## Run Airflow Locally
 
@@ -48,6 +50,8 @@ After the DAG runs, the workflow should produce training or validation artifacts
 
 Airflow makes the training process visible as a pipeline instead of a single manual script. This supports the assignment requirement for scheduling, orchestration, and workflow automation.
 
-## Notes
+## Schedule and Safety
 
-The DAG is configured for manual triggering. This is safer for a project demo because it avoids retraining unexpectedly whenever Airflow starts.
+The default schedule is daily at 02:00 UTC. It can be changed through `AIRFLOW_FLIGHT_TRAINING_SCHEDULE`, or set to an empty value for manual-only runs.
+
+The Azure trigger remains a no-op while `VOYAGE_AZURE_DEPLOYMENT_ENABLED=false`. Airflow can still detect drift, retrain, promote, and validate the local model without contacting Azure.

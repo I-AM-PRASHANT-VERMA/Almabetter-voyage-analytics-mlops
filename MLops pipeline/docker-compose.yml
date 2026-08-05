@@ -107,6 +107,9 @@ services:
       JAVA_OPTS: "-Djenkins.install.runSetupWizard=false"
       JENKINS_ADMIN_ID: ${JENKINS_ADMIN_ID:-prashant_jenkins}
       JENKINS_ADMIN_PASSWORD: ${JENKINS_ADMIN_PASSWORD:-change-me-local}
+      VOYAGE_AZURE_DEPLOYMENT_ENABLED: ${VOYAGE_AZURE_DEPLOYMENT_ENABLED:-false}
+      VOYAGE_GIT_BRANCH: ${VOYAGE_GIT_BRANCH:-main}
+      JENKINS_INTERNAL_URL: http://localhost:8080
     volumes:
       - ../:/workspace/voyage-root
       - ./jenkins/jenkins_home:/var/jenkins_home

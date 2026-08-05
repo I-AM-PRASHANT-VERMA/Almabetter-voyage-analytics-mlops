@@ -43,6 +43,10 @@ REQUIRED_FILES = [
     "local_training/requirements.txt",
     "scripts/validate_flight_regression_workflow.py",
     "scripts/check_flight_dataset_drift.py",
+    "scripts/assess_flight_retraining.py",
+    "scripts/trigger_jenkins_cd.py",
+    "jenkins/init-voyage.groovy",
+    "jenkins/azure-aks-cd-pipeline.groovy",
 ]
 
 PYTHON_FILES = [
@@ -57,6 +61,8 @@ PYTHON_FILES = [
     "local_training/train_flight_price.py",
     "scripts/validate_flight_regression_workflow.py",
     "scripts/check_flight_dataset_drift.py",
+    "scripts/assess_flight_retraining.py",
+    "scripts/trigger_jenkins_cd.py",
 ]
 
 OPTIONAL_TRAINING_OUTPUTS = [
@@ -331,6 +337,25 @@ def inspect_optional_training_outputs(serving_model_summary):
     }
 
 
+def validate_automation_config():
+    compose_text = require_file("docker-compose.yml").read_text(encoding="utf-8")
+    bootstrap_text = require_file("jenkins/init-voyage.groovy").read_text(encoding="utf-8")
+    cd_text = require_file("jenkins/azure-aks-cd-pipeline.groovy").read_text(encoding="utf-8")
+
+    required_markers = {
+        "azure_switch_defaults_false": "VOYAGE_AZURE_DEPLOYMENT_ENABLED:-false" in compose_text,
+        "ci_calls_gated_cd_helper": "trigger_jenkins_cd.py" in bootstrap_text,
+        "cd_reads_pipeline_from_scm": "CpsScmFlowDefinition" in bootstrap_text,
+        "cd_checks_subscription_state": "ACCOUNT_STATE" in cd_text,
+        "cd_can_start_existing_aks": "az aks start" in cd_text,
+        "validation_cleanup_is_gated": "if (params.DEPLOY_TO_AKS)" in cd_text,
+    }
+    missing = [name for name, present in required_markers.items() if not present]
+    if missing:
+        raise ValueError(f"Automation safety markers are missing: {missing}")
+    return required_markers
+
+
 def main():
     # -----------------------------
     # 12. Run full CI validation
@@ -349,6 +374,7 @@ def main():
             "hotel_recommendation": validate_hotel_model(),
             "gender_classification": validate_gender_model(),
         },
+        "automation": validate_automation_config(),
         "optional_training_evidence": inspect_optional_training_outputs(flight_model_summary),
     }
 

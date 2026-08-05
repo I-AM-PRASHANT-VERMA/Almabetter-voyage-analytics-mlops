@@ -24,12 +24,16 @@ DEFAULT_DATASET_PATH = (
 DATASET_PATH = Path(os.getenv("FLIGHT_DATASET_PATH", DEFAULT_DATASET_PATH))  # allow Docker/Airflow to override the dataset path
 
 DRIFT_SCRIPT = PROJECT_ROOT / "scripts" / "check_flight_dataset_drift.py"  # checks the dataset before training
+RETRAINING_SCRIPT = PROJECT_ROOT / "scripts" / "assess_flight_retraining.py"
 TRAINING_RUNNER = PROJECT_ROOT / "scripts" / "run_flight_price_mlflow_experiments.py"  # shared runner for MLflow training and promotion
+CD_TRIGGER_SCRIPT = PROJECT_ROOT / "scripts" / "trigger_jenkins_cd.py"
 DRIFT_REPORT = PROJECT_ROOT / "jenkins_artifacts" / "data_drift" / "flight_dataset_drift_summary.json"  # drift output expected by this DAG
+RETRAINING_DECISION = PROJECT_ROOT / "jenkins_artifacts" / "automation" / "flight_retraining_decision.json"
 EXPERIMENT_SUMMARY_PATH = PROJECT_ROOT / "jenkins_artifacts" / "mlflow_experiments" / "mlflow_experiment_summary.json"  # runner summary file
 
 SERVING_MODEL_PATH = PROJECT_ROOT / "joblib files" / "flight_price_model.joblib"  # final model file used by the apps
 SERVING_METADATA_PATH = PROJECT_ROOT / "joblib files" / "flight_price_model_metadata.json"  # metadata paired with the serving model
+AIRFLOW_SCHEDULE = os.getenv("AIRFLOW_FLIGHT_TRAINING_SCHEDULE", "0 2 * * *").strip() or None
 
 
 # -----------------------------
@@ -79,7 +83,7 @@ def run_command(command: list[str]) -> None:
 # -----------------------------
 @dag(
     dag_id="flight_price_mlflow_training_pipeline",  # name shown in the Airflow UI
-    schedule=None,  # manual trigger only for this training DAG
+    schedule=AIRFLOW_SCHEDULE,
     start_date=pendulum.datetime(2024, 1, 1, tz="UTC"),  # required by Airflow even for manual DAGs
     catchup=False,  # do not create old missed runs
     tags=["mlops", "flight-price", "mlflow", "local-training"],  # makes the DAG easy to filter in Airflow
@@ -91,7 +95,7 @@ def flight_price_mlflow_training_pipeline():
     # -----------------------------
     @task(task_id="check_training_files")
     def check_training_files() -> None:
-        for path in [DATASET_PATH, DRIFT_SCRIPT, TRAINING_RUNNER]:  # fail early if the core inputs are missing
+        for path in [DATASET_PATH, DRIFT_SCRIPT, RETRAINING_SCRIPT, TRAINING_RUNNER, CD_TRIGGER_SCRIPT]:
             if not path.exists() or path.stat().st_size == 0:
                 raise FileNotFoundError(f"Required training file is missing or empty: {path}")  # stop before drift/training starts
 
@@ -104,12 +108,33 @@ def flight_price_mlflow_training_pipeline():
         return str(DRIFT_REPORT.relative_to(PROJECT_ROOT))  # pass a short report path to the next task
 
     # -----------------------------
-    # 7. Run MLflow experiments
+    # 7. Decide whether retraining is needed
+    # -----------------------------
+    @task(task_id="assess_retraining")
+    def assess_retraining(drift_report: str) -> str:
+        run_command(
+            [
+                sys.executable,
+                str(RETRAINING_SCRIPT),
+                "--drift-report",
+                str(PROJECT_ROOT / drift_report),
+                "--output",
+                str(RETRAINING_DECISION),
+            ]
+        )
+        return str(RETRAINING_DECISION)
+
+    # -----------------------------
+    # 8. Run MLflow experiments when required
     # -----------------------------
     @task(task_id="run_mlflow_experiments")
-    def run_mlflow_experiments(drift_report: str) -> str:
-        report = json.loads((PROJECT_ROOT / drift_report).read_text(encoding="utf-8"))  # read the drift result from the previous task
-        print(f"Dataset drift detected before training: {report['drift_detected']}")  # record the dataset status in Airflow logs
+    def run_mlflow_experiments(decision_file: str) -> str:
+        decision = json.loads(Path(decision_file).read_text(encoding="utf-8"))
+        print(f"Retraining required: {decision['retrain_required']}")
+        print(f"Retraining reasons: {decision['reasons']}")
+
+        if not decision["retrain_required"]:
+            return "existing-serving-artifacts"
 
         command = [sys.executable, str(TRAINING_RUNNER), "--profile", "standard"]  # delegate training and promotion to the shared runner
         tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "").strip()  # use MLflow server when Airflow provides one
@@ -120,10 +145,16 @@ def flight_price_mlflow_training_pipeline():
         return str(EXPERIMENT_SUMMARY_PATH)  # pass the runner summary to the verification task
 
     # -----------------------------
-    # 8. Verify promoted outputs
+    # 9. Verify promoted outputs
     # -----------------------------
     @task(task_id="verify_mlflow_outputs")
     def verify_mlflow_outputs(summary_file: str) -> None:
+        if summary_file == "existing-serving-artifacts":
+            if not SERVING_MODEL_PATH.exists() or not SERVING_METADATA_PATH.exists():
+                raise FileNotFoundError("Existing serving artifacts are missing.")
+            print("No retraining was required; existing serving artifacts remain active.")
+            return
+
         summary_path = Path(summary_file)  # summary path returned by the MLflow runner task
         if not summary_path.exists() or not SERVING_MODEL_PATH.exists() or not SERVING_METADATA_PATH.exists():
             raise FileNotFoundError("MLflow summary or promoted serving files were not created.")  # fail if promotion did not produce the expected files
@@ -143,17 +174,35 @@ def flight_price_mlflow_training_pipeline():
         )
 
     # -----------------------------
-    # 9. Wire Airflow task order
+    # 10. Trigger gated CD after a new model is promoted
+    # -----------------------------
+    @task(task_id="trigger_gated_azure_cd")
+    def trigger_gated_azure_cd(decision_file: str) -> None:
+        run_command(
+            [
+                sys.executable,
+                str(CD_TRIGGER_SCRIPT),
+                "--decision-file",
+                decision_file,
+                "--only-if-retraining-required",
+            ]
+        )
+
+    # -----------------------------
+    # 11. Wire Airflow task order
     # -----------------------------
     files_ready = check_training_files()  # first make sure required inputs exist
     drift_report = check_dataset_drift()  # then create the dataset drift report
-    experiment_summary = run_mlflow_experiments(drift_report)  # then run MLflow training after drift check
+    decision_file = assess_retraining(drift_report)
+    experiment_summary = run_mlflow_experiments(decision_file)
+    outputs_verified = verify_mlflow_outputs(experiment_summary)
+    cd_triggered = trigger_gated_azure_cd(decision_file)
 
     files_ready >> drift_report  # explicit dependency: drift check waits for file validation
-    verify_mlflow_outputs(experiment_summary)  # final task checks that promoted files exist
+    outputs_verified >> cd_triggered
 
 
 # -----------------------------
-# 10. Register DAG object
+# 12. Register DAG object
 # -----------------------------
 flight_price_mlflow_training_dag = flight_price_mlflow_training_pipeline()  # expose this DAG to Airflow
