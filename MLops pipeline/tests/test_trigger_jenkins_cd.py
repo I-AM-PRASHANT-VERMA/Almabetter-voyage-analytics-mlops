@@ -40,13 +40,23 @@ class TriggerJenkinsCdTests(unittest.TestCase):
             FakeResponse(location="http://jenkins/queue/item/1/"),
         ]
 
-        with patch.object(MODULE.urllib.request, "urlopen", side_effect=responses) as urlopen:
+        class FakeOpener:
+            def __init__(self):
+                self.requests = []
+
+            def open(self, request, timeout):
+                self.requests.append(request)
+                return responses[len(self.requests) - 1]
+
+        opener = FakeOpener()
+        with patch.object(MODULE, "build_opener", return_value=opener):
             location = MODULE.trigger_cd("http://jenkins", "voyage-analytics-mlops-cd", "user", "password")
 
         self.assertEqual(location, "http://jenkins/queue/item/1/")
-        build_request = urlopen.call_args_list[1].args[0]
-        self.assertIn("DEPLOY_TO_AKS=true", build_request.full_url)
-        self.assertIn("START_AKS_IF_STOPPED=true", build_request.full_url)
+        build_request = opener.requests[1]
+        form_data = build_request.data.decode("utf-8")
+        self.assertIn("DEPLOY_TO_AKS=true", form_data)
+        self.assertIn("START_AKS_IF_STOPPED=true", form_data)
 
 
 if __name__ == "__main__":

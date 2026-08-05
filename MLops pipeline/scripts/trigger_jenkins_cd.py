@@ -1,5 +1,6 @@
 import argparse
 import base64
+import http.cookiejar
 import json
 import os
 import urllib.error
@@ -21,18 +22,22 @@ def read_decision(path: Path | None) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def request(url: str, username: str, password: str, method: str = "GET", headers: dict | None = None):
+def build_opener():
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+
+def request(opener, url: str, username: str, password: str, method: str = "GET", headers: dict | None = None, data: bytes | None = None):
     token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
     request_headers = {"Authorization": f"Basic {token}"}
     request_headers.update(headers or {})
-    http_request = urllib.request.Request(url, method=method, headers=request_headers)
-    return urllib.request.urlopen(http_request, timeout=30)
+    http_request = urllib.request.Request(url, method=method, headers=request_headers, data=data)
+    return opener.open(http_request, timeout=30)
 
 
-def get_crumb(jenkins_url: str, username: str, password: str) -> dict[str, str]:
+def get_crumb(opener, jenkins_url: str, username: str, password: str) -> dict[str, str]:
     crumb_url = f"{jenkins_url.rstrip('/')}/crumbIssuer/api/json"
     try:
-        with request(crumb_url, username, password) as response:
+        with request(opener, crumb_url, username, password) as response:
             payload = json.loads(response.read().decode("utf-8"))
             return {payload["crumbRequestField"]: payload["crumb"]}
     except urllib.error.HTTPError as error:
@@ -42,17 +47,19 @@ def get_crumb(jenkins_url: str, username: str, password: str) -> dict[str, str]:
 
 
 def trigger_cd(jenkins_url: str, job_name: str, username: str, password: str) -> str:
-    query = urllib.parse.urlencode(
+    form_data = urllib.parse.urlencode(
         {
             "DEPLOY_TO_AKS": "true",
             "START_AKS_IF_STOPPED": "true",
             "IMAGE_TAG": "",
         }
-    )
+    ).encode("utf-8")
     job_path = urllib.parse.quote(job_name, safe="")
-    build_url = f"{jenkins_url.rstrip('/')}/job/{job_path}/buildWithParameters?{query}"
-    headers = get_crumb(jenkins_url, username, password)
-    with request(build_url, username, password, method="POST", headers=headers) as response:
+    build_url = f"{jenkins_url.rstrip('/')}/job/{job_path}/buildWithParameters"
+    opener = build_opener()
+    headers = get_crumb(opener, jenkins_url, username, password)
+    headers["Content-Type"] = "application/x-www-form-urlencoded"
+    with request(opener, build_url, username, password, method="POST", headers=headers, data=form_data) as response:
         return response.headers.get("Location", build_url)
 
 
