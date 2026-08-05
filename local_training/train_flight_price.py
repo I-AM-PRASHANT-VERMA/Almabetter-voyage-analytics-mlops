@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import time
@@ -47,6 +48,14 @@ CV_SPLITS = 3
 # Keep tuning intentionally light so the script stays practical on a normal local machine.
 TUNING_ITERATIONS = int(os.getenv("TUNING_ITERATIONS", "5"))
 TRAIN_SAMPLE_ROWS = int(os.getenv("TRAIN_SAMPLE_ROWS", "0"))
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def prepare_folders():
@@ -127,6 +136,7 @@ def build_modeling_dataset(flights, log_file):
     price_group_overlap = sum(key in train_price_groups for key in test_price_groups) / max(len(test_price_groups), 1)  # check repeated pricing patterns
 
     dataset_info = {  # keep dataset details for MLflow and metadata
+        "dataset_sha256": file_sha256(DATA_DIR / "flights.csv"),
         "rows_before_duplicate_cleanup": int(rows_before),
         "rows_after_duplicate_cleanup": int(rows_after),
         "train_rows": int(len(X_train)),

@@ -7,6 +7,7 @@ Monitoring is included to show how the project can be checked after training and
 | File | Purpose |
 | --- | --- |
 | `MLops pipeline/scripts/check_flight_dataset_drift.py` | Compares current flight data with a baseline |
+| `MLops pipeline/scripts/assess_flight_retraining.py` | Combines drift and dataset fingerprint evidence |
 | `dataset/baselines/flight_dataset_baseline.json` | Stored baseline for flight dataset checks |
 | `MLops pipeline/scripts/validate_flight_regression_workflow.py` | Validates promoted flight workflow outputs |
 | `MLops pipeline/scripts/monitor_voyage_workflow.py` | Builds a workflow monitoring report |
@@ -27,6 +28,8 @@ Refresh the baseline only when the current dataset is intentionally accepted:
 ```bash
 python scripts/check_flight_dataset_drift.py --refresh-baseline
 ```
+
+The promoted flight model metadata stores the dataset SHA-256 fingerprint used for training. Airflow and Jenkins compare that fingerprint with the current dataset. A changed fingerprint or a drift alert requests retraining; unchanged data keeps the current model.
 
 ## Health Checks
 
@@ -71,4 +74,4 @@ Monitoring and validation can produce:
 
 ## Notes
 
-The monitoring setup is meant to support project review and troubleshooting. It does not replace a full production monitoring platform, but it shows the main MLOps idea: check data, check services, check workflows, and keep useful run evidence.
+The monitoring setup is meant to support project review and troubleshooting. Dataset drift is connected to the scheduled Airflow retraining decision, while Azure deployment remains protected by the separate environment switch.
